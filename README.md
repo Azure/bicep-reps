@@ -5,9 +5,14 @@ A Bicep REP (Request for Enhancement Proposal) is a formal way to suggest signif
 ## When to Follow the Process
 
 Consider employing this process if you intend to make substantial changes to the Bicep programming language that would affect user experience. Example where the use of a REP is warranted include:
-- *Introduction of New Features*: If the proposed change involves the addition of a new syntax kind or a new ARM template function, particularly if it necessitates the use of a feature flag.
+- *Introduction of New Features*: If the proposed change involves the addition of feature that has major user experience impact, particularly if it necessitates the use of a feature flag. Examples include, but are not limited to:
+  - Adding a new syntax kind.
+  - Adding a new ARM template function.
+  - Adding a new Bicep CLI command.
+  - Incorporating a Bicep VS Code extension feature that requires a new LSP protocol implementation.
 - *Breaking Changes to Non-Experimental Features*: Any alterations that may potentially disrupt existing functionality of non-experimental features.
 - *Feature Deprecation*: When contemplating the replacement of a feature that has already been shipped with a new feature.
+- *Artitechtural changes*:  If the change is aimed at meeting internal non-functional requirements and involves a good amount of design work.
 
 It's important to note that numerous other changes, such as bug fixes and minor feature enhancements, can be implemented through the regular issue triage and pull request review process within the primary Bicep repository.
 
@@ -15,7 +20,7 @@ It's important to note that numerous other changes, such as bug fixes and minor 
 
 While members of the Bicep community are allowed to contribute by authoring new REPs and providing feedback, it's important to note that, in practice, Bicep REPs are typically submitted by the Bicep core maintainers. This submission follows an exclusive design and discussion process among the maintainers. The author of a Bicep REP is not only responsible for the initial design but also for implementing the proposed feature and overseeing the REP's lifecycle.
 
-Therefore, it is generally not recommended for community members to independently initiate the creation of REPs. Instead, we encourage active collaboration and engagement within the main Bicep repository. This involves participating in issue discussions and upvoting feature requests, which can prompt the Bicep core maintainers to initiate the creation of Bicep REPs.
+In many cases, a REP originates from a Bicep feature request issue that has garnered significant upvotes. Therefore, we encourage community members to contribute by initiating an issue for a feature proposal, actively participating in issue discussions, and expressing support through upvoting feature requests, rather than crafting REPs. This can prompt the Bicep core maintainers to initiate the creation of Bicep REPs.
 
 ## Bicep REPs Process
 
@@ -32,25 +37,27 @@ This is the initial stage of a Bicep REP, signaling it as a work-in-progress. To
 - Build consensus and integrate feedback.
 - When the Bicep core maintainers feel confident about the design and have reached a consensus, they should proceed to vote on whether to accept or reject the REP.
 
+> Note: The author has the option to submit a draft PR to initiate a REP before it is fully prepared for review. It's essential to clarify that a draft PR does not signify a draft REP state. A REP is in draft state only if the PR is ready for review.
+
 ### Active
 
 Once a REP is reviewed and approved, it is considered active. The author should take the following steps to maintain the active state of the REP:
 - Replace `0000` in the REP file name with the PR number.
-_ Merge the PR so that the REP file will appear in the active folder in the main branch.
+- Merge the PR so that the REP file will appear in the active folder in the main branch.
 - Proceed with the implementation of the proposed feature.
 - Optionally, consider putting the feature behind a preview feature flag. This would give the author the opportunity to easily make revisions and breaking changes.
 - As the author works towards a final implementation, submit PRs to the bicep-reps repository to keep the active REP in sync with the implementation.
 
 ### Final
 
-REPs in the Final state are considered fully complete and implemented without any preview feature flag. Any proposed changes should be made through a new REP which enhances or deprecates the final REP. To convert an active REP to a final, follow these steps:
+REPs in the Final state are considered fully complete and stable without unresolved issues. The corresponding features must not be behind a feature flag. Any proposed changes must be made through a new REP which enhances or deprecates the final REP. To convert an active REP to a final, follow these steps:
 - Ensure that the active REP is fully implemented and well tested, and there will be no breaking changes to the customer facing API contract.
 - Submit a PR to move the REP from the active folder to the final folder.
     - Optionally, as part of the PR change, if the REP marked as final enhances an existing final REP, include in the existing REP a `Enhanced By` field to reference the new REP.
 
-### Inactive
+### Deferred
 
-An active REP should be moved inactive if the feature does not receive enough positive user feedback. To do so, the author should send a PR to move the REP file from active to inactive.
+An active REP should be moved deferred if the feature does not receive enough positive user feedback. To do so, the author should send a PR to move the REP file from the active folder to the deferred folder.
 
 ### Deprecated
 
@@ -72,10 +79,10 @@ stateDiagram-v2
     [*] --> Draft: Open a PR
     Draft --> Review: Review the PR
     Review --> Active: PR accepted
-    Review --> Rejected: PR rejected
-    Active --> Active: Create new PRs to\n make revision
+    Review --> Rejected: PR rejected and closed
+    Active --> Active: Create new PRs to\n make revisions
     Active --> Final: Feature fully implemented
-    Active --> Inactive: Not enough feedback\n has been received to\n finalize the feature
+    Active --> Deferred: Not enough feedback\n has been received to\n finalize the feature
     Final --> Deprecated: REP superceded by a new REP
     Rejected --> [*]
 ```
