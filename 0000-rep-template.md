@@ -1,9 +1,9 @@
 ---
-REP Number: <Fill me in with a four-digit number matching the pull request number; Update AFTER PR is approved and BEFORE merging.>
+REP Number: <Fill me in with a four-digit number matching the pull request number; Update AFTER PR is approved and BEFORE is merged.>
 Author: <github username (First Name and Last Name)>
 Start Date: <Today's Date, YYYY-MM-DD>
 Feature Status: <Private Preview | Public Preview | Public>
-Bicep Issue Numbers: <Fill if the REP originates from one or more Bicep issues; otherwise, delete.>
+Bicep Issue Number(s): <Fill if the REP originates from one or more Bicep issues; otherwise, delete.>
 Enhances: <Fill an existing final REP number if this REP enhances it; otherwise, delete.>
 Deprecates: <Fill an existing final REP number if this REP deprecates it; otherwise, delete.>
 Enhanced By: <Applicable to existing final REPs only. Fill a final REP number if that REP enhances this one. Delete for new REPs.>
