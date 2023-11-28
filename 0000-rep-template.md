@@ -66,4 +66,6 @@ Deprecated By: <Applicable to existing final REPs only. Fill a final REP number 
 
 > - What related issues are considered out of scope for this REP but could be addressed independently in the future?
 
+**NB**: This section is not intended to capture unfinished elements of a design. For draft proposals, anything that is yet to be decided but must be addressed in order for a feature to be functional or GA should be explicitly called out in the **Design** section (or the **Unresolved questions** section). This section is instead intended to identify related issues or features on which you do not wish to make definitive decisions/foreclose any possibilities. Carefully think through how your design will avoid impacting these out of scope questions -- if your design does impact anything in this section, that is a strong indication that whatever is impacted was not out of scope at all. 
+
 
