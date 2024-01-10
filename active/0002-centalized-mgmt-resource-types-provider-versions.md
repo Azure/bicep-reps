@@ -24,14 +24,14 @@ The [resource type providers dynamic loading feature](https://github.com/Azure/b
 ** Provider Declaration Syntax**
 
 ```bicep
-import 'br:mcr.microsoft.com/bicep/providers/az@1.2.3' // fully-qualified
-import 'br/public:az@1.2.3' // uses provider aliasing defined in bicepconfig.json
+provider 'br:mcr.microsoft.com/bicep/providers/az@1.2.3' // fully-qualified
+provider 'br/public:az@1.2.3' // uses provider aliasing defined in bicepconfig.json
 ```
 
 We also currently support the following syntax for "built-in" providers:
 
 ```bicep
-import 'sys@1.0.0'
+provider 'sys@1.0.0'
 ```
 
 In the above cases, the provider can be referenced by using its symbol which is derived from the segment to the left of the '@' sign. (`az` and `sys` for the declarations above)
@@ -39,8 +39,8 @@ In the above cases, the provider can be referenced by using its symbol which is 
 Both syntaxes also support aliasing of that symbol reference:
 
 ```bicep
-import 'br/public:az@0.2.3' as myAz
-import 'sys@1.0.0' as mySys
+provider 'br/public:az@0.2.3' as myAz
+provider 'sys@1.0.0' as mySys
 ```
 
 The current syntax (shown above) presents several challenges:
@@ -54,9 +54,21 @@ The current syntax (shown above) presents several challenges:
 
 ### Proposed Changes
 
-* [Add a new syntax for the provider import declaration statements: `import {providerName} [as {optionalAlias}]`](#add-a-new-syntax-for-the-provider-import-declaration-statements-import-providername-as-optionalalias)
-* [Remove support for syntax `import '{providerName}@{providerVersion}' [as {optionalAlias}]`](#remove-support-for-syntax-import-providernameproviderversion-as-optionalalias)
-* [Change the delimiter '@' used by the supported provider declaration syntax to ':' to align with module reference syntax and increase consistency](#change-the-delimiter--used-by-the-supported-provider-declaration-syntax-to--to-align-with-module-reference-syntax-and-increase-consistency)
+- [Title - Centralized management of resource type provider versions using package.json](#title---centralized-management-of-resource-type-provider-versions-using-packagejson)
+  - [Summary](#summary)
+  - [Terms and definitions](#terms-and-definitions)
+  - [Motivation](#motivation)
+    - [Proposed Changes](#proposed-changes)
+  - [Detailed design](#detailed-design)
+    - [Client side changes](#client-side-changes)
+      - [Add a new syntax for the provider import declaration statements: `import {providerName} [as {optionalAlias}]`](#add-a-new-syntax-for-the-provider-import-declaration-statements-import-providername-as-optionalalias)
+      - [Remove support for syntax `import '{providerName}@{providerVersion}' [as {optionalAlias}]`](#remove-support-for-syntax-import-providernameproviderversion-as-optionalalias)
+      - [Change the delimiter '@' used by the supported provider declaration syntax to ':' to align with module reference syntax and increase consistency](#change-the-delimiter--used-by-the-supported-provider-declaration-syntax-to--to-align-with-module-reference-syntax-and-increase-consistency)
+  - [Drawbacks](#drawbacks)
+  - [Alternatives](#alternatives)
+  - [Rollout plan](#rollout-plan)
+  - [Unresolved questions](#unresolved-questions)
+  - [Out of scope](#out-of-scope)
 
 ## Detailed design
 
@@ -67,8 +79,8 @@ The current syntax (shown above) presents several challenges:
 The example below shows a usage of the proposed syntax
 
 ```bicep
-import az
-import kubernetes as k8s // uses optional aliasing of the
+provider az
+provider kubernetes as k8s // uses optional aliasing of the
 ```
 
 The resolution of the symbols will be resolved from the builtin `bicepconfig.json` under a new section:
@@ -103,8 +115,8 @@ Since previous provider declaration syntax forms continue to be supported, we in
 The syntax below currently in use to import built-in providers will become invalid and result in a diagnostic as a result of this change
 
 ```bicep
-import 'sys@1.0.0'
-import 'kubernetes@1.0.0' as k8s
+provider 'sys@1.0.0'
+provider 'kubernetes@1.0.0' as k8s
 ```
 
 #### Change the delimiter '@' used by the supported provider declaration syntax to ':' to align with module reference syntax and increase consistency
@@ -112,8 +124,8 @@ import 'kubernetes@1.0.0' as k8s
 The syntax shown below uses ':' instead of '@' as a delimiter for provider declaration statements
 
 ```bicep
-import 'br:mcr.microsoft.com/bicep/providers/az:0.2.3' // notice its NOT using az@0.2.3
-import 'br/public:az:0.2.3' as myAz
+provider 'br:mcr.microsoft.com/bicep/providers/az:0.2.3' // notice its NOT using az@0.2.3
+provider 'br/public:az:0.2.3' as myAz
 ```
 
 ## Drawbacks
