@@ -1,6 +1,6 @@
 ---
 REP Number: 0002
-Author:asilverman (Ariel Silverman)
+Author: asilverman (Ariel Silverman)
 Start Date: 2023-12-19
 Feature Status: Private Preview
 Bicep Issue Number(s): [12202](https://github.com/Azure/bicep/issues/12202)
