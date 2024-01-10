@@ -54,9 +54,9 @@ The current syntax (shown above) presents several challenges:
 
 ### Proposed Changes
 
-[Add a new syntax for the provider import declaration statements: `import {providerName} [as {optionalAlias}]`](#add-a-new-syntax-for-the-provider-import-declaration-statements-import-providername-as-optionalalias)
-[Remove support for syntax `import '{providerName}@{providerVersion}' [as {optionalAlias}]`](#remove-support-for-syntax-import-providernameproviderversion-as-optionalalias)
-[Change the delimiter '@' used by the supported provider declaration syntax to ':' to align with module reference syntax and increase consistency](#change-the-delimiter--used-by-the-supported-provider-declaration-syntax-to--to-align-with-module-reference-syntax-and-increase-consistency)
+* [Add a new syntax for the provider import declaration statements: `import {providerName} [as {optionalAlias}]`](#add-a-new-syntax-for-the-provider-import-declaration-statements-import-providername-as-optionalalias)
+* [Remove support for syntax `import '{providerName}@{providerVersion}' [as {optionalAlias}]`](#remove-support-for-syntax-import-providernameproviderversion-as-optionalalias)
+* [Change the delimiter '@' used by the supported provider declaration syntax to ':' to align with module reference syntax and increase consistency](#change-the-delimiter--used-by-the-supported-provider-declaration-syntax-to--to-align-with-module-reference-syntax-and-increase-consistency)
 
 ## Detailed design
 
