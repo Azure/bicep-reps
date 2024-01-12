@@ -62,7 +62,7 @@ The current syntax (shown above) presents several challenges:
 
 ### Client side changes
 
-#### Add a new syntax for the provider import declaration statements: `import {providerName} [as {optionalAlias}]`
+#### Add a new syntax for the provider import declaration statements: `provider {providerName} [as {optionalAlias}]`
 
 The example below shows a usage of the proposed syntax
 
