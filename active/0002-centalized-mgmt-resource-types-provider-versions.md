@@ -21,7 +21,7 @@ This document proposes a feature that enables users to manage Bicep resource typ
 
 The [resource type providers dynamic loading feature](https://github.com/Azure/bicep/issues/5453) introduces a change in provider declaration statement syntax to include the registry address and version that Bicep will use to resolve resource type declarations.
 
-** Provider Declaration Syntax**
+**Provider Declaration Syntax**
 
 ```bicep
 provider 'br:mcr.microsoft.com/bicep/providers/az@1.2.3' // fully-qualified
@@ -54,21 +54,9 @@ The current syntax (shown above) presents several challenges:
 
 ### Proposed Changes
 
-- [Title - Centralized management of resource type provider versions using package.json](#title---centralized-management-of-resource-type-provider-versions-using-packagejson)
-  - [Summary](#summary)
-  - [Terms and definitions](#terms-and-definitions)
-  - [Motivation](#motivation)
-    - [Proposed Changes](#proposed-changes)
-  - [Detailed design](#detailed-design)
-    - [Client side changes](#client-side-changes)
-      - [Add a new syntax for the provider import declaration statements: `import {providerName} [as {optionalAlias}]`](#add-a-new-syntax-for-the-provider-import-declaration-statements-import-providername-as-optionalalias)
-      - [Remove support for syntax `import '{providerName}@{providerVersion}' [as {optionalAlias}]`](#remove-support-for-syntax-import-providernameproviderversion-as-optionalalias)
-      - [Change the delimiter '@' used by the supported provider declaration syntax to ':' to align with module reference syntax and increase consistency](#change-the-delimiter--used-by-the-supported-provider-declaration-syntax-to--to-align-with-module-reference-syntax-and-increase-consistency)
-  - [Drawbacks](#drawbacks)
-  - [Alternatives](#alternatives)
-  - [Rollout plan](#rollout-plan)
-  - [Unresolved questions](#unresolved-questions)
-  - [Out of scope](#out-of-scope)
+- [Updating `bicepconfig.json` merge semantics](#updating-bicepconfigjson-merge-semantics)
+- [Resolution of namespace identifiers by VSCode extension when inspecting published module sources](#resolution-of-namespace-identifiers-by-vscode-extension-when-inspecting-published-module-sources)
+- [Wildcard semantics for provider versions in `bicepconfig.json`](#wildcard-semantics-for-provider-versions-in-bicepconfigjson)
 
 ## Detailed design
 
@@ -93,12 +81,17 @@ The resolution of the symbols will be resolved from the builtin `bicepconfig.jso
   "providers": {
     "az": {
       // A package reference string (below) gestures Bicep to source the types from the registry address.
-      "source": "mcr.microsoft.com/bicep/providers/az:0.2.3", 
+      "source": {
+        "registry": "mcr.microsoft.com/bicep/providers",
+        "version": "0.2.3",
+      },
       "isDefaultImport": true // Gestures Bicep to implicitly import the namespace identifier to the global scope
     },
     "kubernetes": {
-      // Using the value "builtin" (below) gestures Bicep to source types from the statically compiled NuGet package reference 
-      "source": "builtin", 
+      // Using the value "builtin" (below) gestures Bicep to source types from the statically compiled NuGet package reference
+      "source": {
+        "builtin": true
+      },
       "isDefaultImport": false
     }
   }
@@ -107,7 +100,7 @@ The resolution of the symbols will be resolved from the builtin `bicepconfig.jso
 
 Since previous provider declaration syntax forms continue to be supported, we introduce the following constraints:
 
-- To ensure consistency with pre-existing handling of `bicepconfig.json` the configuration file closest to the Bicep file in the directory hierarchy is used. The [drawbacks](#drawbacks) of this constraint are described below.
+- To ensure consistency with pre-existing handling of `bicepconfig.json` the configuration file closest to the Bicep file in the directory hierarchy is used.
 - The `sys` namespace is coupled to the Bicep bits version and cannot be overriden or dynamically uploaded using the mechanism described above
 
 #### Remove support for syntax `import '{providerName}@{providerVersion}' [as {optionalAlias}]`
@@ -130,9 +123,22 @@ provider 'br/public:az:0.2.3' as myAz
 
 ## Drawbacks
 
-> Discuss any potential drawbacks associated with this approach. Why might this _not_ be a suitable choice? Consider implementation costs, integration with existing and planned features, and the migration cost for Bicep users. Clearly identify if it constitutes a breaking change.
+- Costumers may be confused by the config merge semantics behavior
+- Costumers will not be able to tell from inspecting sources alone what is the provider version used to resolve resource types
 
-1. The proposal uses `bicepconfig.json` to declare the provider information and is ruled by `bicepconfig.json` merge semantics. The merge semantics for `bicepconfig.json` specify that for a given Bicep source file, the configuration file closest to the Bicep file in the directory hierarchy is used. This behavior is not intuitive and may cause users that have specified multiple config files in their project file-structure to experience unexpected behaviors that may include build errors when Bicep attempts to resolve a namespace identifier. This is illustrated by the example below.
+## Alternatives
+
+- Using a separate file other than `bicepconfig.json` to store resource type provider version information was evaluated but adds complexity to UX as users need to be aware of two separate merge semantics (one for config and one for provider packages). Although techically this solves the problem, it would have a detrimental effect in the ease of use and reasoning of Bicep projects and so it is dismissed as a non starter.
+
+## Rollout plan
+
+This change affects the client side only and is applied only when the pre-existing feature flag `DynamicTypeLoadingEnabled` is set.
+
+## Out of scope
+
+### Updating `bicepconfig.json` merge semantics
+
+The proposal declare the provider information in `bicepconfig.json` and as result is ruled by `bicepconfig.json` merge semantics. The merge semantics for `bicepconfig.json` specify that for a given Bicep source file, the configuration file closest to the Bicep file in the directory hierarchy is used. This behavior may not be expected by customers and may cause users that specified multiple config files in their project file-structure to experience consuding behaviors that may include build errors when Bicep attempts to resolve a namespace identifier. This is illustrated by the example below.
 
 **Example: Provider resolution error due as a result of `bicepconfig.json` merge semantics**
 
@@ -151,16 +157,14 @@ provider foo as mainFooProvider
     "providers":{
         "foo": {
             "source": {
-                "registry": "mcr.microsoft.com/bicep/providers/az",
+                "registry": "mcr.microsoft.com/bicep/providers",
                 "version": "1.2.3",
             },
             "isDefaultImport": false
         },
         "bar" : {
             "source": {
-                "registry": "mcr.microsoft.com",
-                "repository": "bicep/providers",
-                "name":
+                "registry": "mcr.microsoft.com/bicep/providers",
                 "version": "3.2.1"
             },
             "isDefaultImport": false
@@ -186,29 +190,63 @@ provider foo as modFooProvider
 }
 ```
 
-The user may intuitively expect Bicep to resolve the provider details of `modFooProvider` by inspection of `src/bicepconfig.json` and for this project to compile successfully in a way that feels familiar with other programming languages where merge semantics are applied on code dependencies (e.g. NPMs `package.json`), however, Bicep config merge semantics uses the configuration file closest to the Bicep file in the directory hierarchy and merges them to the builtin config.
+The user may expect Bicep to resolve the provider details of `modFooProvider` by inspection of `src/bicepconfig.json` and for this project to compile successfully in a way that feels familiar with other programming languages where merge semantics are applied on code dependencies, however, Bicep config merge semantics uses the configuration file closest to the Bicep file in the directory hierarchy and merges them to the builtin config. It doesn't merge other configs in the file hierarchy prior to merging with the builtin config.
 
 In this case Bicep will try to resolve the `modFooProvider` details from `src/modules/bicepconfig.json`. The config doesn't specify a `providers` section, and the builtin config doesn't include a definition for provider `foo` and so the compiler cannot resolve the provider declaration statement and will emit a diagnostic.
 
-If we replace `foo` with `az` in the example above, Bicep resolves `modFooProvider`'s version to be the version of `az` specified in the builtin configuration and not the version `1.2.3` specified in `src/modules/mod.bicep` (inherited from `src/bicepconfig.json`) which is also not intuitive. The reson for this behavior is that current `bicepconfig.json` merge semantics merge `src/modules/bicepconfig.json` with the builtin config and the version applied would be the value specified in the builtin az provider version.
+If we replace `foo` with `az` in the example above, Bicep resolves `modFooProvider`'s version to be the version of `az` specified in the builtin configuration and not the version `1.2.3` specified in `src/modules/mod.bicep` (inherited from `src/bicepconfig.json`) which may also be unexpected. The reson for this behavior is that current `bicepconfig.json` merge semantics merge `src/modules/bicepconfig.json` with the builtin config and the version applied would be the value specified in the builtin az provider version.
 
 This is especially problematic for 3rd party namespace identifiers specified in a `bicepconfig.json` up a file hierarchy, since they would result in a compilation error because they are unspecified in the builtin configuration.
 
-1. TODO: Potential drawback when trying to inspect module sources 
-<!--
-Good morning Stephen & Anthony, I am currently working on a design draft for a feature proposal that may have an overlap with the work you are doing with publishing of sources. The proposal highlights are described here: Proposal - Simplification of "built-in" vs "registry-supplied" providers · Issue #12202 · Azure/bicep (github.com)
- 
-One potential consideration is how would the identifiers be resolved when a user is looking at module sources, specifically consider the scenario below. 
-Stephen, I would really appreciate your thoughts on whether this new syntax affects the source publish requirements  or has some other kind of implications in the ability to resolve published sources in the editor.
- 
-Scenario: User creates and publishes with sources using the new provider syntax 
- 
-Question: How does the VSCode extension  resolve the registry location and provider version it needs to resolve the namespace identifier (`az`) when the consumer of this module want's to inspect the sources?
- 
+### Resolution of namespace identifiers by VSCode extension when inspecting published module sources
+
+The ability to inspect sources is being implemented in Bicep to allow users to see what sources were used to compile a Bicep module, since the version information is codified in the `bicepconfig.json` and that is not published with the sources, the costumer will not be able to immediately know what version of a provider was used to resolve the resources in the souces file. This is illustrated in the example below.
+
+**Example: User consumes a published module (that uses new provider syntax) and inspects its sources**
+
+main.bicep
+
+```bicep
+provider az
+
+module myMod 'br:mcr.microsoft.com/bicep/path/to/my_mod:1.2.3' = {
+  name: 'example'
+  params: {}
+}
+```
+
+Let's assume that `my_mod` was published from a Bicep project with the following `bicepconfig.json`:
+
+bicepconfig.json
+
+```jsonc
+{
+  "providers": {
+    "az": {
+      "source": {
+        "registry": "mcr.microsoft.com/bicep/providers",
+        "version": "0.2.3"
+      },
+      "isDefaultImport": true
+    },
+    "sys": {
+      "source": {
+        "builtin": true
+      },
+      "isDefaultImport": true
+    }
+  }
+}
+```
+
+When the user inspects the sources of `my_mod` they would see the below source, notice how there is no way for the user to know that the `az` namespace is using resources from a package with version `0.1.2` from looking at this file.
+
 my_mod.bicep
+
+```bicep
 provider az
 param location string = 'eastus'
- 
+
 resource sa 'Microsoft.Storage/storageAccounts@2023-01-01' = {
   name: 'test'
   location: location
@@ -217,43 +255,8 @@ resource sa 'Microsoft.Storage/storageAccounts@2023-01-01' = {
     name: 'Standard_LRS'
   }
 }
+```
 
+### Wildcard semantics for provider versions in `bicepconfig.json`
 
-Let's say that the project where the user is publishing this module had the following bicepconfig.json:
-bicepconfig.json
-{
-  "providers": {
-    "az": {
-      "source": {
-        "registry": "mcr.microsoft.com/bicep/providers/az",
-        "version": "0.2.3",
-      },      "isDefaultImport": true    },    
-      "sys": {
-          "source": {
-          "builtin": true
-      },
-      "isDefaultImport": true
-    }
-  }
-}
--->
-
-## Alternatives
-
-- Using a separate file other than `bicepconfig.json` to store resource type provider version information was evaluated but adds complexity to UX as users need to be aware of two separate merge semantics (one for config and one for provider packages) 
-
-## Rollout plan
-
-This change affects the client side only and is applied only when the pre-existing feature flag `DynamicTypeLoadingEnabled` is set. 
-
-## Unresolved questions
-
-> - What aspects of the design do you expect to resolve through the REP process before merging?
-> - What parts of the design do you anticipate resolving through feature implementation before stabilization?
-
-## Out of scope
-
-- `bicepconfig.json` merge semantics
-- resolution of namespace identifiers by VSCode extension when inspecting published module sources  
-
-**NB**: This section is not intended to capture unfinished elements of a design. For draft proposals, anything that is yet to be decided but must be addressed in order for a feature to be functional or GA should be explicitly called out in the **Design** section (or the **Unresolved questions** section). This section is instead intended to identify related issues or features on which you do not wish to make definitive decisions/foreclose any possibilities. Carefully think through how your design will avoid impacting these out of scope questions -- if your design does impact anything in this section, that is a strong indication that whatever is impacted was not out of scope at all.
+At this time we are not proposing support for wildcard semantics on provider versions, this design doesn't preclude us from supporting this in the future.
