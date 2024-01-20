@@ -6,7 +6,7 @@ Feature Status: Private Preview
 Bicep Issue Number(s): [12202](https://github.com/Azure/bicep/issues/12202)
 ---
 
-# Title - Centralized management of resource type provider versions using package.json
+# Title - Centralized management of resource type provider versions using bicepconfig.json
 
 ## Summary
 
@@ -54,7 +54,6 @@ The current syntax (shown above) presents several challenges:
 
 ### Proposed Changes
 
-- [Updating `bicepconfig.json` merge semantics](#updating-bicepconfigjson-merge-semantics)
 - [Resolution of namespace identifiers by VSCode extension when inspecting published module sources](#resolution-of-namespace-identifiers-by-vscode-extension-when-inspecting-published-module-sources)
 - [Wildcard semantics for provider versions in `bicepconfig.json`](#wildcard-semantics-for-provider-versions-in-bicepconfigjson)
 
@@ -103,7 +102,7 @@ Since previous provider declaration syntax forms continue to be supported, we in
 - To ensure consistency with pre-existing handling of `bicepconfig.json` the configuration file closest to the Bicep file in the directory hierarchy is used.
 - The `sys` namespace is coupled to the Bicep bits version and cannot be overriden or dynamically uploaded using the mechanism described above
 
-#### Remove support for syntax `import '{providerName}@{providerVersion}' [as {optionalAlias}]`
+If a user specifies an entry called `sys` in the section above, this will be identified by the json schema as forbidden value. The reason is to prevent someone from overriding this reserved identifier.
 
 The syntax below currently in use to import built-in providers will become invalid and result in a diagnostic as a result of this change
 
@@ -123,7 +122,7 @@ provider 'br/public:az:0.2.3' as myAz
 
 ## Drawbacks
 
-- Costumers may be confused by the config merge semantics behavior
+- Costumers may be confused by the configt merge semantics behavior
 - Costumers will not be able to tell from inspecting sources alone what is the provider version used to resolve resource types
 
 ## Alternatives
@@ -135,6 +134,24 @@ provider 'br/public:az:0.2.3' as myAz
 This change affects the client side only and is applied only when the pre-existing feature flag `DynamicTypeLoadingEnabled` is set.
 
 ## Out of scope
+
+- [Title - Centralized management of resource type provider versions using bicepconfig.json](#title---centralized-management-of-resource-type-provider-versions-using-bicepconfigjson)
+  - [Summary](#summary)
+  - [Terms and definitions](#terms-and-definitions)
+  - [Motivation](#motivation)
+    - [Proposed Changes](#proposed-changes)
+  - [Detailed design](#detailed-design)
+    - [Client side changes](#client-side-changes)
+      - [Add a new syntax for the provider import declaration statements: `provider {providerName} [as {optionalAlias}]`](#add-a-new-syntax-for-the-provider-import-declaration-statements-provider-providername-as-optionalalias)
+      - [Change the delimiter '@' used by the supported provider declaration syntax to ':' to align with module reference syntax and increase consistency](#change-the-delimiter--used-by-the-supported-provider-declaration-syntax-to--to-align-with-module-reference-syntax-and-increase-consistency)
+  - [Drawbacks](#drawbacks)
+  - [Alternatives](#alternatives)
+  - [Rollout plan](#rollout-plan)
+  - [Out of scope](#out-of-scope)
+    - [Updating `bicepconfig.json` merge semantics](#updating-bicepconfigjson-merge-semantics)
+    - [Resolution of namespace identifiers by VSCode extension when inspecting published module sources](#resolution-of-namespace-identifiers-by-vscode-extension-when-inspecting-published-module-sources)
+    - [Wildcard semantics for provider versions in `bicepconfig.json`](#wildcard-semantics-for-provider-versions-in-bicepconfigjson)
+    - [Deciding if `sys` is a compile time import or a resource types provider package](#deciding-if-sys-is-a-compile-time-import-or-a-resource-types-provider-package)
 
 ### Updating `bicepconfig.json` merge semantics
 
@@ -228,12 +245,6 @@ bicepconfig.json
         "version": "0.2.3"
       },
       "isDefaultImport": true
-    },
-    "sys": {
-      "source": {
-        "builtin": true
-      },
-      "isDefaultImport": true
     }
   }
 }
@@ -260,3 +271,7 @@ resource sa 'Microsoft.Storage/storageAccounts@2023-01-01' = {
 ### Wildcard semantics for provider versions in `bicepconfig.json`
 
 At this time we are not proposing support for wildcard semantics on provider versions, this design doesn't preclude us from supporting this in the future.
+
+### Deciding if `sys` is a compile time import or a resource types provider package
+
+It is possible to think of `sys` more like a compile-time namespace import rather than a provider, since all it contains are some built-in functions. We used to share the keyword import between providers and imports, but now that we changed the keyword for providers, at some point we will need to update the implementation for sys to make it a compile-time import. This is out of scope of this REP however.
