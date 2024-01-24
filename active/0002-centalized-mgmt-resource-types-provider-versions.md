@@ -47,7 +47,7 @@ The current syntax (shown above) presents several challenges:
 
 1. The new syntax is quite verbose, and cannot be controlled centrally. For users with a large set of files, picking up the latest version of `az` will require modifying every single file.
 1. The aliasing (assuming that the last segment of the registry namespace == the provider name) & versioning (having an `@` character instead of a `:` which is familiar to module users) behavior of the new syntax can be confusing.
-1. Its deceiving and confusing to allow `sys` to have a pinned versionis fixed version `1.0.0` - this **should** imply that there are no changes between Bicep versions, which isn't realistic.
+1. Its deceiving and confusing to allow `sys` to have a pinned version fixed to `1.0.0` - this **should** imply that there are no changes between Bicep versions, which isn't realistic.
 
 - It's an "either/or" - either users follow the current behavior (`az` imported by default) **or** they're using the new syntax. We don't have a plan for how to combine the two.
 - With [Radius](https://github.com/radius-project/radius), it's conceivable that we may want users to **not** have `az` imported by default.
@@ -76,35 +76,32 @@ The resolution of the symbols will be resolved from the builtin `bicepconfig.jso
 {
   // prior bicepconfig.json sections
   // ...
-
   "providers": {
+    // If you specify the entry `az` here you override the builtin `az` provider
     "az": {
       // A package reference string (below) gestures Bicep to source the types from the registry address.
-      "source": {
-        "registry": "mcr.microsoft.com/bicep/providers",
-        "version": "0.2.3",
-      },
-      "isDefaultImport": true // Gestures Bicep to implicitly import the namespace identifier to the global scope
+      "source": "mcr.microsoft.com/bicep/providers/az",
+      "version": "0.2.3"
     },
     "kubernetes": {
       // Using the value "builtin" (below) gestures Bicep to source types from the statically compiled NuGet package reference
-      "source": {
-        "builtin": true
-      },
-      "isDefaultImport": false
+      "builtIn": true
     }
   }
+  // ...
 }
 ```
 
-Since previous provider declaration syntax forms continue to be supported, we introduce the following constraints:
+Since legacy provider declaration syntax grammar continues to be supported, we introduce the following constraints:
 
 - To ensure consistency with pre-existing handling of `bicepconfig.json` the configuration file closest to the Bicep file in the directory hierarchy is used.
-- The `sys` namespace is coupled to the Bicep bits version and cannot be overriden or dynamically uploaded using the mechanism described above
+- The `sys` identifier is coupled to the Bicep bits and its version cannot be overriden or dynamically uploaded using the mechanism described above
+  If a user specifies an entry called `sys` in the section above, this will be identified by the json schema as forbidden value. The reason is to prevent someone from overriding this reserved identifier.
+- The `az` identifier is implicitly imported into the global scope, the author can override the type definitions used in the namespace by adding an entry in the `providers` section (as shown above).
+- The keys of the `providers` object must all be unique. Notice how the source is the full repository path, so its possible to disambiguate in the case an author chosses to consume a provider with the same name from separate sources.
+- The keys of the `providers` section will be used as the identifiers in the `provider {providerName} [as {optionalAlias}]` statement
 
-If a user specifies an entry called `sys` in the section above, this will be identified by the json schema as forbidden value. The reason is to prevent someone from overriding this reserved identifier.
-
-The syntax below currently in use to import built-in providers will become invalid and result in a diagnostic as a result of this change
+The syntax below currently used to import built-in providers will be deprecated and result in a diagnostic as a consequence of the proposed changes in this proposal
 
 ```bicep
 provider 'sys@1.0.0'
@@ -135,75 +132,58 @@ This change affects the client side only and is applied only when the pre-existi
 
 ## Out of scope
 
-- [Title - Centralized management of resource type provider versions using bicepconfig.json](#title---centralized-management-of-resource-type-provider-versions-using-bicepconfigjson)
-  - [Summary](#summary)
-  - [Terms and definitions](#terms-and-definitions)
-  - [Motivation](#motivation)
-    - [Proposed Changes](#proposed-changes)
-  - [Detailed design](#detailed-design)
-    - [Client side changes](#client-side-changes)
-      - [Add a new syntax for the provider import declaration statements: `provider {providerName} [as {optionalAlias}]`](#add-a-new-syntax-for-the-provider-import-declaration-statements-provider-providername-as-optionalalias)
-      - [Change the delimiter '@' used by the supported provider declaration syntax to ':' to align with module reference syntax and increase consistency](#change-the-delimiter--used-by-the-supported-provider-declaration-syntax-to--to-align-with-module-reference-syntax-and-increase-consistency)
-  - [Drawbacks](#drawbacks)
-  - [Alternatives](#alternatives)
-  - [Rollout plan](#rollout-plan)
-  - [Out of scope](#out-of-scope)
-    - [Updating `bicepconfig.json` merge semantics](#updating-bicepconfigjson-merge-semantics)
-    - [Resolution of namespace identifiers by VSCode extension when inspecting published module sources](#resolution-of-namespace-identifiers-by-vscode-extension-when-inspecting-published-module-sources)
-    - [Wildcard semantics for provider versions in `bicepconfig.json`](#wildcard-semantics-for-provider-versions-in-bicepconfigjson)
-    - [Deciding if `sys` is a compile time import or a resource types provider package](#deciding-if-sys-is-a-compile-time-import-or-a-resource-types-provider-package)
+<!-- no toc -->
+* [Updating `bicepconfig.json` merge semantics](#updating-bicepconfigjson-merge-semantics)
+* [Resolution of namespace identifiers by VSCode extension when inspecting published module sources](#resolution-of-namespace-identifiers-by-vscode-extension-when-inspecting-published-module-sources)
+* [Wildcard semantics for provider versions in `bicepconfig.json`](#wildcard-semantics-for-provider-versions-in-bicepconfigjson)
+* [Deciding if `sys` is a compile time import or a resource types provider package](#deciding-if-sys-is-a-compile-time-import-or-a-resource-types-provider-package)
+* [Implicit import of provider identifiers to global scope](#implicit-import-of-provider-identifiers-to-global-scope)
 
 ### Updating `bicepconfig.json` merge semantics
 
-The proposal declare the provider information in `bicepconfig.json` and as result is ruled by `bicepconfig.json` merge semantics. The merge semantics for `bicepconfig.json` specify that for a given Bicep source file, the configuration file closest to the Bicep file in the directory hierarchy is used. This behavior may not be expected by customers and may cause users that specified multiple config files in their project file-structure to experience consuding behaviors that may include build errors when Bicep attempts to resolve a namespace identifier. This is illustrated by the example below.
+The proposal declares the provider information in `bicepconfig.json` and as result is ruled by `bicepconfig.json` merge semantics. The merge semantics for `bicepconfig.json` specify that for a given Bicep source file, the configuration file closest to the Bicep file in the directory hierarchy is used. This behavior may not be expected by customers and may cause users that specified multiple config files in their project file-structure to experience consuding behaviors that may include build errors when Bicep attempts to resolve a namespace identifier. This is illustrated by the example below.
 
 **Example: Provider resolution error due as a result of `bicepconfig.json` merge semantics**
 
 Consider a Bicep project under folder `src` with the following files:
 
-- `src/main.bicep`
+`src/main.bicep`
 
 ```bicep
 provider foo as mainFooProvider
 ```
 
-- `src/bicepconfig.json`
+`src/bicepconfig.json`
 
 ```bicep
 {
-    "providers":{
-        "foo": {
-            "source": {
-                "registry": "mcr.microsoft.com/bicep/providers",
-                "version": "1.2.3",
-            },
-            "isDefaultImport": false
-        },
-        "bar" : {
-            "source": {
-                "registry": "mcr.microsoft.com/bicep/providers",
-                "version": "3.2.1"
-            },
-            "isDefaultImport": false
-        }
+  "providers":{
+    "foo": {
+      "source": "mcr.microsoft.com/bicep/providers/foo",
+      "version": "1.2.3",
+    },
+    "bar" : {
+      "source": "mcr.microsoft.com/bicep/providers/bar",
+      "version": "3.2.1"
     }
+  }
 }
 ```
 
-- `src/modules/mod.bicep`
+`src/modules/mod.bicep`
 
 ```bicep
 provider bar as modBarProvider
 provider foo as modFooProvider
 ```
 
-- `src/modules/bicepconfig.json`
+`src/modules/bicepconfig.json`
 
 ```bicep
 {
-     "experimentalFeaturesEnabled": {
-        "compileTimeImports": false
-     },
+  "experimentalFeaturesEnabled": {
+    "compileTimeImports": false
+  },
 }
 ```
 
@@ -239,12 +219,9 @@ bicepconfig.json
 ```jsonc
 {
   "providers": {
-    "az": {
-      "source": {
-        "registry": "mcr.microsoft.com/bicep/providers",
-        "version": "0.2.3"
-      },
-      "isDefaultImport": true
+    "az":{
+      "source": "private.azurecr.io/bicep/providers/az",
+      "version": "0.2.3"
     }
   }
 }
@@ -275,3 +252,7 @@ At this time we are not proposing support for wildcard semantics on provider ver
 ### Deciding if `sys` is a compile time import or a resource types provider package
 
 It is possible to think of `sys` more like a compile-time namespace import rather than a provider, since all it contains are some built-in functions. We used to share the keyword import between providers and imports, but now that we changed the keyword for providers, at some point we will need to update the implementation for sys to make it a compile-time import. This is out of scope of this REP however.
+
+### Implicit import of provider identifiers to global scope
+
+In the current impementation two provider identifiers are implicitly imported: `sys` and `az`, their types are available in the global scope and the author doesn't neeed to dereference types using the identifier (i.e. `resourceGroup() vs az.resourceGroup()`). A prior version of this proposal introduced the concept of `importProviderByDefault` to allow users to appy the aforementioned behavior on other providers. This is out of scope for this proposal and is not advised since pollution of the global namespace makes the code harder to read.  
