@@ -218,6 +218,10 @@ Implementing this enhancement involves comprehensive modifications across variou
 
 Building on the previous discussion, if the deploymentProvider details are not included within `outputResources` for Azure resources, should we consistently list the `az` provider in the `deploymentProviders` for sake of consistentcy and clarity?
 
+### Should `outputResources` include `existing` resources as well?
+
+Currently, `outputResources` only contains created or updated resources. Should we expand the property to include `existing` resources?
+
 ## Out of scope
 
 ### Portal UI design
