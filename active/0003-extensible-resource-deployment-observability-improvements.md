@@ -44,8 +44,6 @@ This additional data would enable users to identify a deployed extensible resour
 
 ## Detailed design
 
-> The core of the REP. Elaborate on the design and implementation with sufficient detail for someone familiar with Bicep to grasp. Provide detailed examples to illustrate how the feature is used and its implications on user experience.
-
 ### `Microsoft.Resources/deployments` API changes for PUT and GET
 
 #### Adding `deploymentProviders`
@@ -73,7 +71,7 @@ The `Microsoft.Resources/deployments` API will be updated to include a `deployme
         ]
       }
     ],
-+   "deploymentProviders": [
++   "deploymentProviders": [ // Alternative name: "importedProviders".
 +     {
 +       "alias": "az",
 +       "name": "AzureResourceManager",
@@ -221,6 +219,10 @@ Building on the previous discussion, if the deploymentProvider details are not i
 ### Should `outputResources` include `existing` resources as well?
 
 Currently, `outputResources` only contains created or updated resources. Should we expand the property to include `existing` resources?
+
+### Better name for `deploymentProviders`
+
+Can we come up with some better names?
 
 ## Out of scope
 
