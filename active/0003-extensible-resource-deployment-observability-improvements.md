@@ -48,7 +48,7 @@ This additional data would enable users to identify a deployed extensible resour
 
 #### Adding `deploymentProviders`
 
-The `Microsoft.Resources/deployments` API will be updated to include a `deploymentProviders` array in both the PUT and GET response bodies. This modification is intended to incorporate information about deployment providers that are involved in executing the deployment to offer a more comprehensive deployment view.
+The `Microsoft.Resources/deployments` API will be updated to include a `deploymentProviders` array in both the PUT and GET response bodies. This modification is intended to incorporate information about deployment providers that are involved in executing the parent deployment and nested deployments to offer a more comprehensive deployment view.
 
 > It's worth noting that we cannot use the name `providers` as the property `providers` is already assigned to return Azure Resource Provider information. While an alternative approach could involve renaming the current `providers` property to `resourceProviders` for enhanced accuracy, the solution should be avoided as it constitutes a breaking change.
 
@@ -71,13 +71,16 @@ The `Microsoft.Resources/deployments` API will be updated to include a `deployme
         ]
       }
     ],
-+   "deploymentProviders": [ // Alternative name: "importedProviders".
++   "deploymentProviders": [ // Can we come up with a better name?
 +     {
+        // deploymentId is used to uniquely identify a provider since a nested deployment could import the same provider with the same alias.
++       "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
 +       "alias": "az",
 +       "name": "AzureResourceManager",
 +       "version": "1.0.0"
 +     }  ,
 +     {
++       "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
 +       "alias": "kubernetes",
 +       "name": "Kubernetes",
 +       "version": "1.27.8"
@@ -89,7 +92,7 @@ The `Microsoft.Resources/deployments` API will be updated to include a `deployme
 
 #### Updating the `outputResources` to include more identifiable information
 
-To improve the current structure where each `outputResources` object only has a resource `id`, it's essential to add more properties for identifying extensible resources, which lack resource IDs. These additions should include the symbolic name, the resource type, and the deployment provider alias.
+To improve the current structure where each `outputResources` object only has a resource `id`, it's essential to add more properties for identifying extensible resources, which lack resource IDs. These additions should include the symbolic name, the resource type, the ID of the deployment containing the resource, and the deployment provider alias.
 
 ```diff
 {
@@ -105,6 +108,7 @@ To improve the current structure where each `outputResources` object only has a 
       {
 +       "symbolicName": "myService",
 +       "resourceType": "core/Service@v1",
++       "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
 +       "deploymentProvider": "kubernetes"
       }
     ]
@@ -223,6 +227,16 @@ Currently, `outputResources` only contains created or updated resources. Should 
 ### Better name for `deploymentProviders`
 
 Can we come up with some better names?
+
+- `importedProviders`
+- `infraProviders`
+- `managementProviders`
+- `apiProviders`
+- `platformProviders`
+- `platforms`
+- `protocols`
+- `services`
+- `workloads`
 
 ## Out of scope
 
