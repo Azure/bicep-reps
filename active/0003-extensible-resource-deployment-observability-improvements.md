@@ -242,5 +242,5 @@ Can we come up with some better names?
 
 ### Portal UI design
 
-The update to the Portal deployments blade is necessary to display the symbolic name and deployment provider information for extensible resources. Since the portal team has ownership of the deployments blade, they hold the responsibility for both the UI design and the implementation of these changes. 
+The update to the Portal deployments blade is necessary to display the symbolic name and deployment provider information for extensible resources. Since the portal team has ownership of the deployments blade, they hold the responsibility for both the UI design and the implementation of these changes. The addition of new properties — `deploymentProviders` in the deployments API and `deploymentProvider` in the deployment operations API — provides the Portal team with the essential data to programmatically differentiate between Azure resources and extensible resources. This capability is key to enabling the team to design a UI that effectively segregates and presents Azure resources and extensible resources.
 
