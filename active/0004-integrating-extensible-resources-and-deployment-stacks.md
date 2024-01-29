@@ -234,7 +234,7 @@ When a configuration item is marked as a `secureString` or `secureObject` and it
   "type": "Microsoft.Resources/deployments",
   "properties": {
     ...
-    "deploymentProviderConfigurations": {
+    "deploymentProviderConfigs": {
       "k8s": {
         "kubeConfig": {
           "value": "TOP_SECRET"
@@ -394,7 +394,7 @@ During the deployment process, the system recognizes kubeConfig as a runtime ref
 +           "runtimeReference": {
 +             "resourceId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.ContainerService/managedClusters/aksCluster",
 +             "action": "listClusterAdminCredential", // Possible values include "reference" and "list*" actions.
-+             "propertyPath": "kuberconfig[0].value" // A JSONPath query to the accessed property.
++             "propertyPath": "$.kuberconfig[0].value" // A JSONPath query to the accessed property.
 +           }
 +         },
 +         "namespace": {
