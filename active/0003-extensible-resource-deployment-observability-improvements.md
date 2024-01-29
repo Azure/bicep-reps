@@ -17,12 +17,12 @@ This REP outlines API enhancements for [`Microsoft.Resources/deployments`](https
 
 An API abstraction for the following operations:
 
-- Creating or updating Azure Resources or extensible resources declared in Bicep files or an ARM templates;
+- Creating or updating Azure Resources or extensible resources declared in Bicep files or ARM templates;
 - Performing resource-level or provider-level queries that have no side effects through provider functions in Bicep files or ARM templates, e.g., list secrets of a resource (currently, this is only supported by the az provider).
 
 ### Extensibility Provider
 
-An extensibility provider refers to any deployment provider that operates outside the scope of ARM, such as the MS Graph provider and the Kubernetes provider. An extensibility provider deployes extensible resources instead of Azure resources.
+An extensibility provider refers to any deployment provider that operates outside the scope of ARM, such as the MS Graph provider and the Kubernetes provider. An extensibility provider deploys extensible resources instead of Azure resources.
 
 ### Extensible Resource
 
