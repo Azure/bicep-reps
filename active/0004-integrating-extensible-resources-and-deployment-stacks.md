@@ -142,8 +142,6 @@ Given that the API mandates the inclusion of provider configuration within the r
 
 As mentioned in the [Authentication and authorization through provider configuration](#authentication-and-authorization-through-provider-configuration) section, the deployments API must be updated to save provider configuration to support the invocation of the `POST /resources/{referenceId}/deleteWithConfig` API.
 
-However, the storage of configuration values post-deployment varies based on their types and how their values are specified, leading to instances where they may not be retained.
-
 For example, below is an ARM template with the Kubernetes provider imported:
 
 ```JSON
