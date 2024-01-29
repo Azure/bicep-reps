@@ -542,6 +542,6 @@ As the changes are drastic, the feature may likely require an ARM feature flag. 
 
 Crafting the intricate blueprint for incorporating the OAuth OBO flow within Deployment Stacks is beyond the scope of the REP.
 
-### Resource rocking
+### Resource locking
 
 Deployment Stacks enables the locking of ARM resources to protect them from external changes or deletions. This functionality, however, doesn't extend to all control planes due to their diverse architectures and capabilities. Future revisions of the extensibility contract might explore the addition of resource locking, especially if there's significant demand or compatibility with a specific control plane's features. For the time being, expanding this feature beyond ARM resources remains outside the current scope.
