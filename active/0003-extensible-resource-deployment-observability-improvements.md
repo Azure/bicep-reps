@@ -234,6 +234,9 @@ Can we come up with some better names?
 - `apiProviders`
 - `platformProviders`
 - `platforms`
+- `apis`
+- `plugins`
+- `vendors`
 - `protocols`
 - `services`
 - `workloads`
