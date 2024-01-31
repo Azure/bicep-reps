@@ -187,7 +187,7 @@ To ensure a secure and controlled deployment of the API modifications, the rollo
 
 ## Unresolved questions
 
-### Consistent schema V.S. Minimum backend changes
+### [Resolved] Consistent schema V.S. Minimum backend changes
 
 To address the inconsistency in output resource schema between Azure resources and extensible resources, as highlighted in the Drawbacks section, a potential solution involves extending the schema to include additional properties for Azure resources as well, making Azure resources and extensible resources uniformly identifiable. For example:
 
@@ -202,12 +202,14 @@ To address the inconsistency in output resource schema between Azure resources a
         "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Storage/storageAccounts/my-storage-account"
 +       "symbolicName": "myStorageAccount",
 +       "resourceType": "Microsoft.Storage/storageAccounts",
++       "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
 +       "deploymentProvider": "az"
       },
       // Extensible resource
       {
 +       "symbolicName": "myService",
 +       "resourceType": "core/Service@v1",
++       "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
 +       "deploymentProvider": "kubernetes"
       }
   }
@@ -216,13 +218,19 @@ To address the inconsistency in output resource schema between Azure resources a
 
 Implementing this enhancement involves comprehensive modifications across various deployment engine components, including but not limited to `AzureDeploymentEngine`, `ResourceProxyDefinition`, `DeploymentOutputResourceDefinition`, and numerous deployment jobs. Such widespread changes carry a significant risk due to the complexity of the deployment engine and the potential for unforeseen impacts on its functionality, which would require careful consideration and discussion.
 
-### Should the az provider always be returned?
+> ✅ The decision is to not include Azure resources considering the risks.
+
+### [Resolved] Should the az provider always be returned?
 
 Building on the previous discussion, if the deploymentProvider details are not included within `outputResources` for Azure resources, should we consistently list the `az` provider in the `deploymentProviders` for sake of consistentcy and clarity?
+
+> ✅ The az provider should be returned as long as it is present in the ARM template.
 
 ### Should `outputResources` include `existing` resources as well?
 
 Currently, `outputResources` only contains created or updated resources. Should we expand the property to include `existing` resources?
+
+> ✅ No, we should not change the semantics of the `outputResources` property. If there is a need for returning referenced resources in the future, a new property like `referencedResources` can be added.
 
 ### Better name for `deploymentProviders`
 
