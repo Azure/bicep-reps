@@ -13,20 +13,16 @@ This REP outlines API enhancements for [`Microsoft.Resources/deployments`](https
 
 ## Terms and definitions
 
-### Deployment Provider
+### Bicep Extension
 
 An API abstraction for the following operations:
 
 - Creating or updating Azure Resources or extensible resources declared in Bicep files or ARM templates;
-- Performing resource-level or provider-level queries that have no side effects through provider functions in Bicep files or ARM templates, e.g., list secrets of a resource (currently, this is only supported by the az provider).
-
-### Extensibility Provider
-
-An extensibility provider refers to any deployment provider that operates outside the scope of ARM, such as the MS Graph provider and the Kubernetes provider. An extensibility provider deploys extensible resources instead of Azure resources.
+- Performing resource-level or extension-level queries that have no side effects through functions in Bicep files or ARM templates, e.g., list secrets of a resource (currently, this is only supported by the az extension).
 
 ### Extensible Resource
 
-An Azure data-plane resource or non-Azure resource declared in a Bicep file or an ARM template. Extensible resources are deployed through extensibility providers.
+An Azure data-plane resource or non-Azure resource declared in a Bicep file or an ARM template. Extensible resources are deployed through Bicep extensions.
 
 ## Motivation
 
@@ -36,9 +32,10 @@ To address this issue, the deployments and deployment operations APIs must be up
 
 - Resource symbolic name
 - Resource type
-- Deployment provider alias
-- Deployment provider name
-- Deployment provider version
+- Deployment ID
+- Bicep extension alias
+- Bicep extension name
+- Bicep extension version
 
 This additional data would enable users to identify a deployed extensible resource and map it to the corresponding resource definition in a Bicep file or an ARM template, providing users with comprehensive insights.
 
@@ -46,11 +43,9 @@ This additional data would enable users to identify a deployed extensible resour
 
 ### `Microsoft.Resources/deployments` API changes for PUT and GET
 
-#### Adding `deploymentProviders`
+#### Adding `extensions`
 
-The `Microsoft.Resources/deployments` API will be updated to include a `deploymentProviders` array in both the PUT and GET response bodies. This modification is intended to incorporate information about deployment providers that are involved in executing the parent deployment and nested deployments to offer a more comprehensive deployment view.
-
-> It's worth noting that we cannot use the name `providers` as the property `providers` is already assigned to return Azure Resource Provider information. While an alternative approach could involve renaming the current `providers` property to `resourceProviders` for enhanced accuracy, the solution should be avoided as it constitutes a breaking change.
+The `Microsoft.Resources/deployments` API will be updated to include an `extensions` array in both the PUT and GET response bodies. This modification is intended to incorporate information about extensions that are involved in executing the parent deployment and nested deployments to offer a more comprehensive deployment view.
 
 ```diff
 {
@@ -71,9 +66,9 @@ The `Microsoft.Resources/deployments` API will be updated to include a `deployme
         ]
       }
     ],
-+   "deploymentProviders": [ // Can we come up with a better name?
++   "extensions": [
 +     {
-        // deploymentId is used to uniquely identify a provider since a nested deployment could import the same provider with the same alias.
+        // deploymentId is used to uniquely identify an extension since a nested deployment could import the same extension with the same alias.
 +       "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
 +       "alias": "az",
 +       "name": "AzureResourceManager",
@@ -109,7 +104,7 @@ To improve the current structure where each `outputResources` object only has a 
 +       "symbolicName": "myService",
 +       "resourceType": "core/Service@v1",
 +       "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
-+       "deploymentProvider": "kubernetes"
++       "extension": "kubernetes"
       }
     ]
   }
@@ -118,9 +113,9 @@ To improve the current structure where each `outputResources` object only has a 
 
 ### `Microsoft.Resources/deployments/operations` API changes for GET and LIST
 
-#### Updating `targetResource` to include symbolic name and provider for extensible resources
+#### Updating `targetResource` to include symbolic name and extension for extensible resources
 
-To align with modifications made to the `Microsoft.Resources/deployments API`, the response body now incorporates the addition of `symbolicName` and `deploymentProvider`.
+To align with modifications made to the `Microsoft.Resources/deployments API`, the response body now incorporates the addition of `symbolicName` and `extension`.
 
 ```diff
 {
@@ -131,7 +126,7 @@ To align with modifications made to the `Microsoft.Resources/deployments API`, t
     "targetResource": {
       "resourceType": "core/Service@v1",
 +     "symbolicName": "myService",
-+     "deploymentProvider": {
++     "extension": {
 +       "alias": "kubernetes",
 +       "name": "Kubernetes",
 +       "version": "1.27.8"
@@ -203,14 +198,14 @@ To address the inconsistency in output resource schema between Azure resources a
 +       "symbolicName": "myStorageAccount",
 +       "resourceType": "Microsoft.Storage/storageAccounts",
 +       "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
-+       "deploymentProvider": "az"
++       "extension": "az"
       },
       // Extensible resource
       {
 +       "symbolicName": "myService",
 +       "resourceType": "core/Service@v1",
 +       "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
-+       "deploymentProvider": "kubernetes"
++       "extension": "kubernetes"
       }
   }
 }
@@ -220,11 +215,11 @@ Implementing this enhancement involves comprehensive modifications across variou
 
 > ✅ The decision is to not include Azure resources considering the risks.
 
-### [Resolved] Should the az provider always be returned?
+### [Resolved] Should the az extension always be returned?
 
-Building on the previous discussion, if the deploymentProvider details are not included within `outputResources` for Azure resources, should we consistently list the `az` provider in the `deploymentProviders` for sake of consistentcy and clarity?
+Building on the previous discussion, if the extension details are not included within `outputResources` for Azure resources, should we consistently list the `az` extension in `extensions` for sake of consistentcy and clarity?
 
-> ✅ The az provider should be returned as long as it is present in the ARM template.
+> ✅ The az extension should be returned as long as it is present in the ARM template.
 
 ### Should `outputResources` include `existing` resources as well?
 
@@ -232,7 +227,9 @@ Currently, `outputResources` only contains created or updated resources. Should 
 
 > ✅ No, we should not change the semantics of the `outputResources` property. If there is a need for returning referenced resources in the future, a new property like `referencedResources` can be added.
 
-### Better name for `deploymentProviders`
+### [Resolved] Better name for `deploymentProviders`
+
+> For context, the `extensions` property added to the deployments API output was `deploymentProviders` in the original design.
 
 Can we come up with some better names?
 
@@ -243,15 +240,22 @@ Can we come up with some better names?
 - `platformProviders`
 - `platforms`
 - `apis`
+- `extensions`
 - `plugins`
 - `vendors`
 - `protocols`
 - `services`
 - `workloads`
 
+> ✅ We decided to use `extensions` (or "Bicep extensions" and "ARM template extensions" for added clarity) as suggested by @anthony-c-martin for these reasons:
+> - The term `providers` is considered to be highly ambiguous, particularly within the ARM context where it typically denotes Azure resource providers, which could confuse discussions around Bicep's extensibility features. Although qualifiers can help clarify the context, finding an appropriate and precise qualifier is challenging. Additionally, the introduction of a qualifier results in the formation of a compound noun, which can be cumbersome and less user-friendly.
+> - The term `extensions` is deemed to be less prone to misunderstanding. The potential for confusion between Bicep / ARM template deployment extensions and Azure resource providers is minimal. Although the term is also used in the context of Azure extension resources, it is a less common usage. Notably, the Graph team has already adopted the term extensions over providers internally for clearer internal communication.
+> - The concept of "extensibility" has been a recurring theme in our public documentation. Adopting the term `extensions` aligns closely with this existing terminology, making it a more intuitive choice.
+> - 💪 "Bicep extension" resonates well with our established naming conventions for Bicep-related features.
+
+
 ## Out of scope
 
 ### Portal UI design
 
-The update to the Portal deployments blade is necessary to display the symbolic name and deployment provider information for extensible resources. Since the portal team has ownership of the deployments blade, they hold the responsibility for both the UI design and the implementation of these changes. The addition of new properties — `deploymentProviders` in the deployments API and `deploymentProvider` in the deployment operations API — provides the Portal team with the essential data to programmatically differentiate between Azure resources and extensible resources. This capability is key to enabling the team to design a UI that effectively segregates and presents Azure resources and extensible resources.
-
+The update to the Portal deployments blade is necessary to display the symbolic name and Bicep extension information for extensible resources. Since the portal team has ownership of the deployments blade, they hold the responsibility for both the UI design and the implementation of these changes. The addition of new properties — `extensions` in the deployments API and `extensions` in the deployment operations API — provides the Portal team with the essential data to programmatically differentiate between Azure resources and extensible resources. This capability is key to enabling the team to design a UI that effectively segregates and presents Azure resources and extensible resources.
