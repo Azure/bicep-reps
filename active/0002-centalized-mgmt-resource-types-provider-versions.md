@@ -70,25 +70,19 @@ provider az
 provider kubernetes as k8s // uses optional aliasing of the
 ```
 
-The resolution of the identifiers will be determined from inspection of the closest `bicepconfig.json` to the file merged with the builtin configuration. We propose to add a new section `providers` and `implicitProviders`.
+The resolution of the identifiers will be determined from the closest `bicepconfig.json` to the file merged with the builtin configuration. We propose to add a new section `providerImports` and `implicitProviderImports`.
 
 Example: The new default configuration
 ```json
 {
   // prior bicepconfig.json sections
   // ...
-  "providers": {
-    "az": {
-      "builtIn": true
-    },
-    "kubernetes":{
-      "builtIn": true
-    },
-    "microsoftGraph":{
-      "builtIn": true
-    }
+  "providerImports": {
+    "az": "builtIn",
+    "kubernetes": "builtIn",
+    "microsoftGraph": "builtIn"
   },
-  "implicitProviders": [
+  "implicitProviderImports": [
     "az"
   ]
 }
@@ -99,37 +93,26 @@ Users can opt-in into the centralized provider version management by specifying 
 Example: A `bicepconfig.json` that defines a dynamically loaded provider
 ```json
 {
- "providers": {
-    "az": {
-      "source": "mcr.microsoft.com/bicep/providers/az",
-      "version": "0.2.3"
-    },
+ "providerImports": {
+    "az": "mcr.microsoft.com/bicep/providers/az:0.2.3"
   },
-  "implicitProviders": [
+  "implicitProviderImports": [
     "kubernetes"
   ]
 }
 ```
 
-Bicep will replace-merge the contents in the `bicepconfig.json` with the default resulting the th following configuration being loaded to be used in the compilation.
+Bicep will replace-merge the contents in the `bicepconfig.json` with the default resulting the following configuration being loaded.
 
 `bicepconfig.json`
 ```json
 {
- "providers": {
-    "az": {
-      "source": "mcr.microsoft.com/bicep/providers/az",
-      "version": "0.2.3"
-    },
-    "kubernetes": {
-      "builIn": true
-    },
-    "microsoftGraph":
-    {
-      "builtIn": true
-    }
+ "providerImports": {
+    "az": "mcr.microsoft.com/bicep/providers/az:0.2.3",
+    "kubernetes": "builIn",
+    "microsoftGraph": "builtIn",
   },
-  "implicitProviders": [
+  "implicitProviderImports": [
     "kubernetes"
   ]
 }
@@ -138,10 +121,10 @@ Bicep will replace-merge the contents in the `bicepconfig.json` with the default
 Given legacy provider declaration syntax grammar continues to be supported, we introduce the following constraints:
 
 - To ensure consistency with pre-existing handling of `bicepconfig.json` the configuration file closest to the Bicep file in the directory hierarchy is used.
-- The `az` identifier is implicitly imported into the global scope, the author can override the type definitions used in the namespace by adding an entry in the `providers` section (as shown above). 
+- The `az` identifier is implicitly imported into the global scope, the author can override the type definitions used in the namespace by adding an entry in the `providerImports` section (as shown above). 
 - The builtIn versions used for the resolution of built-in providers are determined by the NuGet package reference dependency in `Bicep.Core.csproj`.
-- The keys of the `providers` object must be distinct. Notice how the source is the full repository path, so its possible to disambiguate in the case an author chosses to consume a provider with the same name from separate sources.
-- The keys of the `providers` section will be the identifiers (`{providerName}`) in the `provider {providerName} [as {optionalAlias}]` declaration statement.
+- The keys of the `providerImports` object must be distinct. Notice how the source is the full repository path, so its possible to disambiguate in the case an author chosses to consume a provider with the same name from separate sources.
+- The keys of the `providerImports` section will be used as the identifier (`{providerName}`) in the `provider {providerName} [as {optionalAlias}]` declaration statement.
 - The `sys` identifier is coupled to the Bicep bits and its version cannot be overriden or dynamically uploaded using the mechanism described above
 - If a user specifies an entry called `sys` in the `providers` section above, it will result in a json schema violation. This behavior is to prevent a user from overriding the sys namespace.
 
@@ -163,11 +146,11 @@ provider 'br/public:az:0.2.3' as myAz
 
 #### Allow users to configure providers that are implicitly imported
 
-The `implicitProviders` section of `bicepconfig.json` allows users to opt-in/out of implicit import functionality for a given provider. This section also follows the existing config merge semantics so users interested in keeping with the legacy behavior must opt-in by specifying the `az` provider in the array.
+The `implicitProviderImports` section of `bicepconfig.json` allows users to opt-in/out of implicit import functionality for a given provider. This section also follows the existing config merge semantics so users interested in keeping with the legacy behavior must opt-in by specifying the `az` provider in the array.
 
 ## Drawbacks
 
-- Users may be confused by the configt merge semantics behavior
+- Users may be confused by the config merge semantics behavior
 - Users will not be able to tell from inspecting sources alone what is the provider version used to resolve resource types
 
 ## Alternatives
@@ -203,17 +186,11 @@ provider foo as mainFooProvider
 
 `src/bicepconfig.json`
 
-```bicep
+```json
 {
-  "providers":{
-    "foo": {
-      "source": "mcr.microsoft.com/bicep/providers/foo",
-      "version": "1.2.3",
-    },
-    "bar" : {
-      "source": "mcr.microsoft.com/bicep/providers/bar",
-      "version": "3.2.1"
-    }
+  "providerImports":{
+    "foo": "mcr.microsoft.com/bicep/providers/foo:1.2.3",
+    "bar" : "mcr.microsoft.com/bicep/providers/bar:3.2.1"
   }
 }
 ```
@@ -266,11 +243,8 @@ bicepconfig.json
 
 ```jsonc
 {
-  "providers": {
-    "az":{
-      "source": "private.azurecr.io/bicep/providers/az",
-      "version": "0.2.3"
-    }
+  "providerImports": {
+    "az": "private.azurecr.io/bicep/providers/az:0.2.3"
   }
 }
 ```
