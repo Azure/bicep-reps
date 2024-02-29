@@ -113,7 +113,7 @@ Bicep will replace-merge the contents in the `bicepconfig.json` with the default
 {
  "providers": {
     "az": "br:mcr.microsoft.com/bicep/providers/az:0.2.3",
-    "kubernetes": "builin:",
+    "kubernetes": "builtin:",
     "microsoftGraph": "builtin:",
   },
   "implicitProviders": [
