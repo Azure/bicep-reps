@@ -30,22 +30,24 @@ Users currently encounter a major challenge when deploying extensible resources,
 
 To address this issue, the deployments and deployment operations APIs must be updated to include additional information, such as:
 
-- Resource symbolic name
-- Resource type
-- Deployment ID
+- Deployment resource ID
 - Bicep extension alias
 - Bicep extension name
 - Bicep extension version
+- Resource symbolic name
+- Resource type
+- Resource API version
+- Resource identifiers
 
 This additional data would enable users to identify a deployed extensible resource and map it to the corresponding resource definition in a Bicep file or an ARM template, providing users with comprehensive insights.
 
 ## Detailed design
 
-### `Microsoft.Resources/deployments` API changes for PUT and GET
+### API change for `GET /Microsoft.Resources/deployments/{deploymentId}`
 
 #### Adding `extensions`
 
-The `Microsoft.Resources/deployments` API will be updated to include an `extensions` array in both the PUT and GET response bodies. This modification is intended to incorporate information about extensions that are involved in executing the parent deployment and nested deployments to offer a more comprehensive deployment view.
+The `Microsoft.Resources/deployments` API will be updated to include an `extensions` array in the GET response body. This modification is intended to incorporate information about extensions that are involved in executing the parent deployment and nested deployments.
 
 ```diff
 {
@@ -78,7 +80,10 @@ The `Microsoft.Resources/deployments` API will be updated to include an `extensi
 +       "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
 +       "alias": "kubernetes",
 +       "name": "Kubernetes",
-+       "version": "1.27.8"
++       "version": "1.27.8",
++       "config": {
++         // Out of the scope of this REP, but it is required to enable Deployment Stacks integration.  
++       }
 +     }
     ]
   }
@@ -87,7 +92,7 @@ The `Microsoft.Resources/deployments` API will be updated to include an `extensi
 
 #### Updating the `outputResources` to include more identifiable information
 
-To improve the current structure where each `outputResources` object only has a resource `id`, it's essential to add more properties for identifying extensible resources, which lack resource IDs. These additions should include the symbolic name, the resource type, the ID of the deployment containing the resource, and the deployment provider alias.
+To improve the current structure where each `outputResources` object only has a resource `id`, it's essential to add more properties for identifying extensible resources, which lack resource IDs. These additions should include the resource symbolic name, resource type, resource API version, resource identifier, the resource ID of the deployment containing the resource, and the Bicep extension alias.
 
 ```diff
 {
@@ -101,21 +106,29 @@ To improve the current structure where each `outputResources` object only has a 
       },
       // Extensible resource
       {
-+       "symbolicName": "myService",
-+       "resourceType": "core/Service@v1",
 +       "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
 +       "extension": "kubernetes"
++       "symbolicName": "myService",
++       "resourceType": "core/Service",
++       "apiVersion": "v1",
++       "identifiers": {
++         "metadata": {
++           "namespace": "default",
++           "name": "myService",
++         },
++         "serverHostHash": "60fd32871cbe255d5793ce9e6ebf628beba25224cde7104e6a302f474f2f656e"
++       }
       }
     ]
   }
 }
 ```
 
-### `Microsoft.Resources/deployments/operations` API changes for GET and LIST
+### API changes for `GET /Microsoft.Resources/deployments/operations/{operationId}` and `GET /Microsoft.Resources/deployments/operations`
 
-#### Updating `targetResource` to include symbolic name and extension for extensible resources
+#### Updating `targetResource` to include extensible resource and extension information
 
-To align with modifications made to the `Microsoft.Resources/deployments API`, the response body now incorporates the addition of `symbolicName` and `extension`.
+To align with modifications made to the `Microsoft.Resources/deployments` API, the response body now incorporates the addition of `symbolicName`, `resourceType`, `apiVersion`, `identifiers`, and `extension`.
 
 ```diff
 {
@@ -124,8 +137,16 @@ To align with modifications made to the `Microsoft.Resources/deployments API`, t
     "provisioningOperation": "Create",
     "provisioningState": "Succeeded",
     "targetResource": {
-      "resourceType": "core/Service@v1",
+      "resourceType": "core/Service",
++     "apiVersion": "v1",
 +     "symbolicName": "myService",
++     "identifiers": {
++       "metadata": {
++         "namespace": "default",
++         "name": "myService",
++       },
++       "serverHostHash": "60fd32871cbe255d5793ce9e6ebf628beba25224cde7104e6a302f474f2f656e"
++     },
 +     "extension": {
 +       "alias": "kubernetes",
 +       "name": "Kubernetes",
@@ -197,15 +218,9 @@ To address the inconsistency in output resource schema between Azure resources a
         "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Storage/storageAccounts/my-storage-account"
 +       "symbolicName": "myStorageAccount",
 +       "resourceType": "Microsoft.Storage/storageAccounts",
++       "apiVersion": "2020-01-01",
 +       "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
 +       "extension": "az"
-      },
-      // Extensible resource
-      {
-+       "symbolicName": "myService",
-+       "resourceType": "core/Service@v1",
-+       "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
-+       "extension": "kubernetes"
       }
   }
 }
@@ -229,7 +244,7 @@ Currently, `outputResources` only contains created or updated resources. Should 
 
 ### [Resolved] Better name for `deploymentProviders`
 
-> For context, the `extensions` property added to the deployments API output was `deploymentProviders` in the original design.
+> ℹ️ The `extensions` property added to the deployments API response body was originally named `deploymentProviders` in the initial design.
 
 Can we come up with some better names?
 
@@ -259,3 +274,7 @@ Can we come up with some better names?
 ### Portal UI design
 
 The update to the Portal deployments blade is necessary to display the symbolic name and Bicep extension information for extensible resources. Since the portal team has ownership of the deployments blade, they hold the responsibility for both the UI design and the implementation of these changes. The addition of new properties — `extensions` in the deployments API and `extensions` in the deployment operations API — provides the Portal team with the essential data to programmatically differentiate between Azure resources and extensible resources. This capability is key to enabling the team to design a UI that effectively segregates and presents Azure resources and extensible resources.
+
+### Including extension config in `GET /Microsoft.Resources/deployments/{deploymentId}` response body
+
+This should be designed separately within the scope of the Deployment Stacks and Bicep extensibility integration project.
