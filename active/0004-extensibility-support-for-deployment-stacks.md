@@ -90,7 +90,7 @@ at deletion time from the user's deployment template to process these language e
 
 The stacks service cannot store user secrets, and it should not evaluate dynamic deployment template language expressions.
 The stacks service needs extension configurations to be defined in a format that is interpretable at deletion time that
-is transparent to the user.
+is transparent to the user and secure.
 
 ### The new design
 
@@ -131,19 +131,22 @@ module extResources 'extResources.bicep' = {
 
 The keys of the "extensions" object are the extension aliases of the module deployment. If an alias is not provided, it
 will be the extension name. The values of the object are extension configurations. Optionality of configuration is
-determined by the extension. Expressions in this object can be constrained to expressions that can be compiled
-to simple directives that both the deployments engine and the stacks service can execute.
+determined by the extension. If this is compared to a typical resource group deployment, it is aligned because the
+resource group being deployed to is not defined within the deployment itself, but as a parameter to the deployment,
+either through the CLI parameters or as a scope for nested deployments. In this example, the deployment scope(s) are 
+being defined as extension configurations. Expressions in this object can be constrained to expressions that can be 
+compiled to simple directives that both the deployments engine and the stacks service can execute.
 
 Allowed expressions:
 - ARM resource access that can be compiled to a resource ID (`aksCluster` in the example).
-- ARM resource API calls that can be compiled to a URI, HTTP method and any inputs (`listClusterAdminCredential` in the example).
+- ARM resource API calls that can be compiled to a URI, HTTP method, and any inputs (`listClusterAdminCredential` in the example).
 - JSON value accessors (`kubeconfig[0].value` in the example).
 - Usage of compile-time constants (the `0` in `kubeconfig[0]`, `namespace: 'default'` in the example).
 
 Disallowed expressions:
-- TBD.
 - Usage of deployment parameters.
 - Usage of Bicep or ARM template functions (built-in or user defined).
+- Usage of branched expressions (ternaries).
 
 ### Server side changes
 
@@ -157,13 +160,25 @@ Disallowed expressions:
 implementation costs, integration with existing and planned features, and the migration cost for Bicep users. Clearly
 identify if it constitutes a breaking change.
 
+The biggest drawback of this approach is that extension configuration data cannot be sourced from deployment parameters.
+This design decision is driven solely to support the stacks user experience not needing to prompt for the parameter 
+values of the last stack deployment as user secrets cannot be persisted long term. This has the side effect of disallowing
+the use of non-secret parameters as well, such as the "namespace" in the Kubernetes extension use case. There could be
+a constraint to allow only non-secure parameter usage in extension configurations, but that could end up encouraging the
+user to not use secure parameters for data that should be secured to work around it. Alternatively, the secret portion
+of the extension configuration could be split into from non-secret data. The secret portion would adopt the design proposed
+in this REP and the non-secret portion could be kept as-is, but there would need to be a way for the extension to
+provide metadata about the properties of the configuration schema.
+
 The move of extension configuration definitions to the parent deployment properties along with the language expression 
 constraints it imposes means that extension resources that require a configuration will no longer be deployable
 as a root deployment. There is no mechanism at the root level to provide this data. Client side changes would need to
 be implemented to accept extension configurations that conform to the expression rules. Another complication is how the 
 user experience of templates would be affected. Because there's expectation that a parent deployment will supply extension
 configurations, it wouldn't be possible to provide a design-time error diagnostic in the extension resource deployment
-file until it is used as a root deployment.
+file until it is used as a root deployment. There needs to be documentation on expectations of deployment setup for 
+these scenarios. One way to mitigate the problem in the UX directly is to provide a non-error diagnostic on the extension
+line for extensions that require configuration so at least the user is aware at the time of authoring.
 
 ## Alternatives
 
@@ -190,11 +205,21 @@ the user did not properly maintain this secret and it's now invalid? This type o
 update of a stack when resources that no longer managed are to be deleted and potentially result in unexpected stack
 states. The errors would likely manifest as incidents for the stacks team to investigate.
 
+### Breaking up extension configurations into secret and non-secret components
+
+This question was arrived at in the drawbacks section. The extension would need to provide metadata about top-level 
+configuration properties to enable the various layers to differentiate secret versus non-secret properties. It would
+enable use of deployment parameters within non-secret portions of the extension configuration and stacks could persist
+these value. Splitting the definition sites of the configuration based on this would be complex and likely confusing. 
+For example, imagine a hybrid of the current implementation and new design where in the Kubernetes example, the 
+"kubeConfig" was declared as the new design spells out but the "namespace" portion is declared where it is currently.
+
 ## Out of scope
 
 > - What related issues are considered out of scope for this REP but could be addressed independently in the future?
 
-- Client support for root level deployments with extensions that require an extension configuration.
+- Client support for root level deployments with extensions that require an extension configuration. A mechanism similar 
+to parameters files would be needed for each deployment client and it's not necessary for a minimal integration.
 - Deployment stack resource locks on extension resources (in ARM, this is deny assignments that prevent deletion or 
 update of resources while being managed by the stack).
 
