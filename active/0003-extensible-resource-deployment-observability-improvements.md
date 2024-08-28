@@ -75,10 +75,10 @@ The `Microsoft.Resources/deployments` API will be updated to include an `extensi
 +       "alias": "az",
 +       "name": "AzureResourceManager",
 +       "version": "1.0.0"
-+     }  ,
++     },
 +     {
 +       "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
-+       "alias": "kubernetes",
++       "alias": "k8s",
 +       "name": "Kubernetes",
 +       "version": "1.27.8",
 +       "config": {
@@ -107,7 +107,8 @@ To improve the current structure where each `outputResources` object only has a 
       // Extensible resource
       {
 +       "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
-+       "extension": "kubernetes"
++       "extensionAlias": "k8s",
++       "extension": "Kubernetes",
 +       "symbolicName": "myService",
 +       "resourceType": "core/Service",
 +       "apiVersion": "v1",
@@ -148,7 +149,7 @@ To align with modifications made to the `Microsoft.Resources/deployments` API, t
 +       "serverHostHash": "60fd32871cbe255d5793ce9e6ebf628beba25224cde7104e6a302f474f2f656e"
 +     },
 +     "extension": {
-+       "alias": "kubernetes",
++       "alias": "k8s",
 +       "name": "Kubernetes",
 +       "version": "1.27.8"
 +     }
@@ -220,7 +221,8 @@ To address the inconsistency in output resource schema between Azure resources a
 +       "resourceType": "Microsoft.Storage/storageAccounts",
 +       "apiVersion": "2020-01-01",
 +       "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
-+       "extension": "az"
++       "extensionAlias": "az",
++       "extension": "AzureResourceManager"
       }
   }
 }
