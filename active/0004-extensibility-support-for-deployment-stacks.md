@@ -118,11 +118,6 @@ resource aksCluster '...' = {
 module extResources 'extResources.bicep' = {
   name: 'k8sResourcesDeploymentName'
   extensions: {
-    // The keys are extension aliases (or extension name if no alias is set)
-    // The values are extension configs
-    // Optionality of extension config is decided by the extension
-    // Expressions in this scope are limited to what we can compile to a simple directive the stacks service can execute (ARM Resource API call, JSON path). 
-    // No deployment parameters or other dynamic expressions that cannot be compiled to simple directives.
     k8s: {
       kubeConfig: aksCluster.listClusterAdminCredential().kubeconfig[0].value
       namespace: 'default'
@@ -136,7 +131,7 @@ module extResources 'extResources.bicep' = {
 
 The keys of the "extensions" object are the extension aliases of the module deployment. If an alias is not provided, it
 will be the extension name. The values of the object are extension configurations. Optionality of configuration is
-determined by the extension. Expressions in this object can be constrained to simple expressions that can be compiled
+determined by the extension. Expressions in this object can be constrained to expressions that can be compiled
 to simple directives that both the deployments engine and the stacks service can execute.
 
 Allowed expressions:
