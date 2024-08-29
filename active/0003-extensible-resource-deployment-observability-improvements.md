@@ -204,6 +204,35 @@ To ensure a secure and controlled deployment of the API modifications, the rollo
 
 ## Unresolved questions
 
+### Provide a hash of extension resource identifiers
+
+The identifiers object of the extension resource object has an unpredictable schema as it's decided by the extension.
+This complicates assigning a key to the resource because equality contracts (with hashing) need to be established on 
+the key. If a hash were to be supplied to the user in the API, it would need be sourced from a serialized JSON string
+where the properties are recursively ordered with a stable sort. The JSON object would contain the identifiers object
+supplied by the extension and any additional context needed to prevent possibility of collision.
+
+```diff
+"outputResources": [
+  // Extensible resource
+  {
+    "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
+    "extensionAlias": "k8s",
+    "extension": "Kubernetes",
+    "symbolicName": "myService",
+    "resourceType": "core/Service",
+    "apiVersion": "v1",
+    "identifiers": {
+      "metadata": {
+        "namespace": "default",
+        "name": "myService",
+      },
+      "serverHostHash": "60fd32871cbe255d5793ce9e6ebf628beba25224cde7104e6a302f474f2f656e"
+    },
++   "identifiersHash": "SHA-256 hash that can be used as a key"
+  }
+```
+
 ### [Resolved] Consistent schema V.S. Minimum backend changes
 
 To address the inconsistency in output resource schema between Azure resources and extensible resources, as highlighted in the Drawbacks section, a potential solution involves extending the schema to include additional properties for Azure resources as well, making Azure resources and extensible resources uniformly identifiable. For example:
