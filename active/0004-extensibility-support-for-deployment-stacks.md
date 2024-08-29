@@ -176,11 +176,13 @@ interpretation.
 
 ```json
 {
+   // ... deployment contract
    "extensions": [
       {
          "name": "Kubernetes",
          "alias": "k8s",
          "version": "1.0.0",
+         "deploymentId": "/subscriptions/.../resourceGroups/.../providers/Microsoft.Resources/deployments/...",
          "config": {
             "namespace": {
                "type": "string",
@@ -191,7 +193,7 @@ interpretation.
                "evaluation": [
                   {
                      "type": "ArmApiCall",
-                     "resourceId": "/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters",
+                     "resourceId": "/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/...",
                      "method": "GET",
                      "apiVersion": "2024-02-01",
                      "apiAction": "/listClusterAdminCredential",
