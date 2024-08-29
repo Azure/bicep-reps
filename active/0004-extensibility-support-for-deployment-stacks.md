@@ -92,7 +92,7 @@ The stacks service cannot store user secrets, and it should not evaluate dynamic
 The stacks service needs extension configurations to be defined in a format that is interpretable at deletion time that
 is transparent to the user and secure.
 
-### The new design
+### The new design from the Bicep perspective
 
 The following Bicep code illustrates the new design for extension configurations. The root deployment supplies the
 extension configuration details to the child deployment, allowing direct access to ARM resources that supply secrets in 
@@ -172,7 +172,7 @@ provide metadata about the properties of the configuration schema.
 
 The move of extension configuration definitions to the parent deployment properties along with the language expression 
 constraints it imposes means that extension resources that require a configuration will no longer be deployable
-as a root deployment. There is no mechanism at the root level to provide this data. Client side changes would need to
+in a root deployment. There is no mechanism at the root level to provide this data. Client side changes would need to
 be implemented to accept extension configurations that conform to the expression rules. Another complication is how the 
 user experience of templates would be affected. Because there's expectation that a parent deployment will supply extension
 configurations, it wouldn't be possible to provide a design-time error diagnostic in the extension resource deployment
@@ -182,18 +182,72 @@ line for extensions that require configuration so at least the user is aware at 
 
 ## Alternatives
 
-> Explore alternative designs that were considered and clarify why the chosen design stands out among possible options.
-Provide rationale and discuss the impact of not selecting other designs.
+### Resource deployment parameters
+
+The reason why extension configuration is moved to the deployment input is mostly due to needing to be able to
+reference ARM resources in a parent deployment as the source of truth for the configuration. When deployment parameters
+as they are today are used for extension configurations, there are more layers make assertions at for the expression
+constraints. In addition, it's not currently possible to define a deployment parameter as a reference to an ARM resource
+in a way that can be analyzed at template evaluation time. There are draft designs for this type of feature, but it is 
+not available at the start time of this document. Deployment parameters are currently limited to primitives and basic 
+types that do not provide enough engine-level metadata to make assertions about the source of a parameter value (for 
+example, how could it be known that a secure string parameter is always sourced from the AKS cluster admin credentials 
+in the Kubernetes example?).
+
+Resource deployment parameters, if designed in a way that enforces a certain resource type, would solve this issue, and
+there wouldn't be need to move the extension configuration definition site. Having this available would also solve the
+root deployment problem because the parameter would be like any other parameter, but enforced to be a string resource ID
+of the defined resource type. This would also minimize the changes needed to clients.
+
+The reason this approach is not chosen is due to dependency on this feature development which would delay stacks extension
+support. It needs to be decided if it's worth implementing that feature first.
+
+Here is an example of this approach:
+
+```bicep
+param aksCluster Resource<'Microsoft.ContainerService/managedClusters@2024-02-01'> // = "/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/...
+
+param namespace string = 'default'
+
+extension kubernetes with {
+  kubeConfig: aksCluster.listClusterAdminCredential().kubeconfig[0].value
+  namespace: namespace
+}
+
+// ...
+```
 
 ## Rollout plan
 
-> Describe how you will deliver your feature. Does it need to be an experimental feature? If the feature involves
-backend changes, dose it need to be guarded by an ARM feature flag?
+The milestone for the initial rollout will be the successful deletion of extension resources through stacks. Supporting
+features for extensibility are considered experimental so this specific feature will be considered experimental.
+
+Here are factors that need to be considered for the rollout:
+- AKS/Kubernetes in Azure is only available in production environments and this is the only available V2 extension at
+this time that can be tested with.
+- New prod API versions require going through swagger review which can take a lot of time.
+- SDK updates for the deployment service should be consumed by Stacks before releasing the Stacks Stable API Version.
+
+The rollout:
+1. Changes in both the Deployments service and Stacks service will be feature gated.
+    - Feature gate needs to be at the subscription level to enable Canary-scoped development and testing.
+    - The feature gate should apply on whatever the current stable (or preview) API version is for each service 
+      (or all API versions if it easier).
+1. Development iteration of the Deployment service and Stack service will take place and be tested in Canary until the 
+milestone is hit.
+1. Develop some synthetics to run in production that use the kubernetes extension in a Deployment stack.
+1. Once the milestone implementation is sufficiently bug bashed and signed off by the team, the feature gate will be
+disabled.
+1. The Swagger update process will begin for at least a new Prod Preview API version.
+    - Priority should be given to the deployments side due to it being a dependency.
+    - Both swagger updates could be potentially be done in parallel.
+    - It may be possible to start the Deployment service swagger early if there's confidence in its changes.
+1. Incorporate any changes from swagger review and retest if needed using the feature flags.
+1. Merge the Deployment service swagger changes and release SDK.
+1. Update stacks code to consume new deployment SDK code.
+1. Merge the Deployment stack swagger changes and release SDK.
 
 ## Unresolved questions
-
-> - What aspects of the design do you expect to resolve through the REP process before merging?
-> - What parts of the design do you anticipate resolving through feature implementation before stabilization?
 
 ### Key vault secret expressions in extension configurations
 
@@ -210,24 +264,20 @@ states. The errors would likely manifest as incidents for the stacks team to inv
 This question was arrived at in the drawbacks section. The extension would need to provide metadata about top-level 
 configuration properties to enable the various layers to differentiate secret versus non-secret properties. It would
 enable use of deployment parameters within non-secret portions of the extension configuration and stacks could persist
-these value. Splitting the definition sites of the configuration based on this would be complex and likely confusing. 
-For example, imagine a hybrid of the current implementation and new design where in the Kubernetes example, the 
-"kubeConfig" was declared as the new design spells out but the "namespace" portion is declared where it is currently.
+these value.
+
+### Getting the resource dependency graph of a deployment
+
+Deletion of resources may require sequencing to avoid failures in deletion. The stacks service will employ a brute-force
+approach to resource deletion, which means it will keep retrying all resources until they succeed within reasonable limits.
+If brute-force is not sufficient or there's common cases where ordering is necessary, the design may need modification to
+fetch the deployment dependency graph from the Deployments service after stack template deployment has completed and 
+persist it in the stack for later use. This is highly dependent on opaque extension-specific expectations.
 
 ## Out of scope
 
-> - What related issues are considered out of scope for this REP but could be addressed independently in the future?
-
 - Client support for root level deployments with extensions that require an extension configuration. A mechanism similar 
-to parameters files would be needed for each deployment client and it's not necessary for a minimal integration.
+to parameters files would be needed for each deployment client and it's not necessary for a minimal integration. There
+are other efforts of similar nature in progress, such as `.bicepdeploy` files.
 - Deployment stack resource locks on extension resources (in ARM, this is deny assignments that prevent deletion or 
 update of resources while being managed by the stack).
-
-**NB**: This section is not intended to capture unfinished elements of a design. For draft proposals, anything that is
-yet to be decided but must be addressed in order for a feature to be functional or GA should be explicitly called out in
-the **Design** section (or the **Unresolved questions** section). This section is instead intended to identify related
-issues or features on which you do not wish to make definitive decisions/foreclose any possibilities. Carefully think
-through how your design will avoid impacting these out of scope questions -- if your design does impact anything in this
-section, that is a strong indication that whatever is impacted was not out of scope at all. 
-
-
