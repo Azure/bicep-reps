@@ -58,9 +58,10 @@ deployment parameters. See the examples section for Bicep and ARM template examp
 
 Why this change is necessary becomes more clear by observing what the stacks services would be required to do with the
 current implementation. Consider this Bicep deployment:
+
 ```bicep
 @secure()
-param kubeConfigParam string // prone to error: what if it's not secured.
+param kubeConfigParam string
 
 extension kubernetes with { // this will produce a diagnostic if the config is not provided
   kubeConfig: kubeConfigParam
@@ -98,16 +99,6 @@ The following Bicep code illustrates the new design for extension configurations
 extension configuration details to the child deployment, allowing direct access to ARM resources that supply secrets in 
 the root deployment.
 
-extResources.bicep - Child deployment with extension resources
-
-```bicep
-extension kubernetes as k8s // optional alias
-
-extension microsoftGraph // No config is needed for this one. This extension uses OAuth OBO.
-
-// ... extension resources
-```
-
 main.bicep - The root deployment
 ```bicep
 // The ARM aksCluster resource can supply kubeConfigs for the AKS Kubernetes use case.
@@ -129,6 +120,15 @@ module extResources 'extResources.bicep' = {
 }
 ```
 
+extResources.bicep - Child deployment with extension resources
+```bicep
+extension kubernetes as k8s // optional alias
+
+extension microsoftGraph // No config is needed for this one. This extension uses OAuth OBO.
+
+// ... extension resources
+```
+
 The keys of the "extensions" object are the extension aliases of the module deployment. If an alias is not provided, it
 will be the extension name. The values of the object are extension configurations. Optionality of configuration is
 determined by the extension. If this is compared to a typical resource group deployment, it is aligned because the
@@ -148,11 +148,67 @@ Disallowed expressions:
 - Usage of Bicep or ARM template functions (built-in or user defined).
 - Usage of branched expressions (ternaries).
 
-### Server side changes
+### The new design from the ARM template perspective
 
-### Microsoft.Resources/deployments API changes (if applicable)
+The above Bicep files would compile to the following ARM templates:
 
-### Examples
+main.json - The root deployment
+```json
+{
+}
+```
+
+extResources.json - Child deployment with extension resources
+```json
+{
+}
+```
+
+### Microsoft.Resources/deployments API changes
+
+This REP extends upon the API changes in REP 0003 by adding a configuration value to the extensions returned from
+a deployment GET. This configuration object will be similar in style to how deployment parameters and type definitions
+are defined in deployment templates. Configuration object property values can be literal values such as  strings, 
+booleans, and objects. Values can also be directives, such as to fetch a value from an ARM resource API. Each type of
+directive will be enumerated. The deployment engine will be responsible for converting template language expressions
+to these directives that both the deployment service can and stacks service can process without need for complex
+interpretation.
+
+```json
+{
+   "extensions": [
+      {
+         "name": "Kubernetes",
+         "alias": "k8s",
+         "version": "1.0.0",
+         "config": {
+            "namespace": {
+               "type": "string",
+               "value": "default"
+            },
+            "kubeConfig": {
+               "type": "Directive",
+               "evaluation": [
+                  {
+                     "type": "ArmApiCall",
+                     "resourceId": "/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters",
+                     "method": "GET",
+                     "apiVersion": "2024-02-01",
+                     "apiAction": "/listClusterAdminCredential",
+                     "query": "?a=1&b=2" // optional
+                     "body": { } // optional
+                  },
+                  {
+                     "type": "JSONPath",
+                     "path": "kubeconfig[0].value" // decompose?
+                  }
+               ]
+            }
+         }
+      }
+   ]
+}
+```
 
 ## Drawbacks
 
@@ -246,6 +302,8 @@ disabled.
 1. Merge the Deployment service swagger changes and release SDK.
 1. Update stacks code to consume new deployment SDK code.
 1. Merge the Deployment stack swagger changes and release SDK.
+1. Update client tools such as Azure CLI and Azure PowerShell to handle the new API responses.
+1. Collaborate with the Portal team to update the deployments blade, ensuring that the UI reflects the API changes.
 
 ## Unresolved questions
 
