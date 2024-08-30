@@ -107,8 +107,8 @@ resource aksCluster '...' = {
 }
 
 module extResources 'extResources.bicep' = {
-  name: 'k8sResourcesDeploymentName'
-  extensions: {
+  name: 'extResourcesDeploymentName'
+  extensionConfigs: {
     k8s: {
       kubeConfig: aksCluster.listClusterAdminCredential().kubeconfig[0].value
       namespace: 'default'
@@ -129,8 +129,8 @@ extension microsoftGraph // No config is needed for this one. This extension use
 // ... extension resources
 ```
 
-The keys of the "extensions" object are the extension aliases of the module deployment. If an alias is not provided, it
-will be the extension name. The values of the object are extension configurations. Optionality of configuration is
+The keys of the "extensionConfigs" object are the extension aliases of the module deployment. If an alias is not provided,
+it will be the extension name. The values of the object are extension configurations. Optionality of configuration is
 determined by the extension. If this is compared to a typical resource group deployment, it is aligned because the
 resource group being deployed to is not defined within the deployment itself, but as a parameter to the deployment,
 either through the CLI parameters or as a scope for nested deployments. In this example, the deployment scope(s) are 
@@ -150,29 +150,70 @@ Disallowed expressions:
 
 ### The new design from the ARM template perspective
 
-The above Bicep files would compile to the following ARM templates:
+The main Bicep deployment would compile to the following ARM template following this paragraph. Only REP relevant data
+is shown. The new "extensionConfigs" deployment property will be similar in style to how deployment parameters and type 
+definitions are defined in deployment templates. Configuration object property values can be literal values such as strings,
+booleans, and objects. Values can also be directives, such as to fetch a value from an ARM resource API. A directive
+consists of one or more evaluation steps. The Bicep compiler will be responsible for converting template language 
+expressions to these directives that both the deployment service can and stacks service can process without need for 
+complex interpretation. The directives will not contain template language expressions to simplify any validation needed
+for acceptable directives.
 
 main.json - The root deployment
 ```json
 {
-}
-```
-
-extResources.json - Child deployment with extension resources
-```json
-{
+   "resources": {
+      "extResources": {
+         "type": "Microsoft.Resources/deployments",
+         "apiVersion": "2022-09-01",
+         "name": "extResourcesDeploymentName",
+         "properties": {
+            "extensionConfigs": {
+               "k8s": {
+                  "namespace": {
+                     "type": "string",
+                     "value": "default"
+                  },
+                  "kubeConfig": {
+                     "type": "directive",
+                     "evaluation": [
+                        {
+                           "type": "ArmApiCall",
+                           "resourceId": "/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/...",
+                           "method": "GET",
+                           "apiVersion": "2024-02-01",
+                           "apiAction": "/listClusterAdminCredential",
+                           "query": "?a=1&b=2" // optional
+                           "body": {} // optional
+                        },
+                        {
+                           "type": "JSONPath",
+                           "path": "kubeconfig[0].value"
+                        }
+                     ]
+                  }
+               }
+            },
+            "template": {
+               "extensions": {
+                  "k8s": {
+                     "extension": "Kubernetes",
+                     "version": "1.0.0"
+                     // "config" is removed, it's expected to be provided by properties of the deployment
+                  }
+               }
+            }
+         }
+      }
+   }
 }
 ```
 
 ### Microsoft.Resources/deployments API changes
 
 This REP extends upon the API changes in REP 0003 by adding a configuration value to the extensions returned from
-a deployment GET. This configuration object will be similar in style to how deployment parameters and type definitions
-are defined in deployment templates. Configuration object property values can be literal values such as  strings, 
-booleans, and objects. Values can also be directives, such as to fetch a value from an ARM resource API. Each type of
-directive will be enumerated. The deployment engine will be responsible for converting template language expressions
-to these directives that both the deployment service can and stacks service can process without need for complex
-interpretation.
+a deployment GET. This configuration object will be the same as the configuration object described in the above ARM
+template design changes.
 
 ```json
 {
@@ -189,7 +230,7 @@ interpretation.
                "value": "default"
             },
             "kubeConfig": {
-               "type": "Directive",
+               "type": "directive",
                "evaluation": [
                   {
                      "type": "ArmApiCall",
@@ -212,18 +253,19 @@ interpretation.
 }
 ```
 
-## Drawbacks
+With the deployments service returning a list of all extensions (across all nested deployments) with their configuration
+directives and returning all extension resources deployed in the template (across all nested deployments), the stacks 
+service can process each extension resource and use the "deploymentId" and "extensionAlias" properties as a composite 
+key to the data in the extensions array.
 
-> Discuss any potential drawbacks associated with this approach. Why might this *not* be a suitable choice? Consider
-implementation costs, integration with existing and planned features, and the migration cost for Bicep users. Clearly
-identify if it constitutes a breaking change.
+## Drawbacks
 
 The biggest drawback of this approach is that extension configuration data cannot be sourced from deployment parameters.
 This design decision is driven solely to support the stacks user experience not needing to prompt for the parameter 
 values of the last stack deployment as user secrets cannot be persisted long term. This has the side effect of disallowing
 the use of non-secret parameters as well, such as the "namespace" in the Kubernetes extension use case. There could be
 a constraint to allow only non-secure parameter usage in extension configurations, but that could end up encouraging the
-user to not use secure parameters for data that should be secured to work around it. Alternatively, the secret portion
+user to work around that by not using secure parameters for data that should be secured. Alternatively, the secret portion
 of the extension configuration could be split into from non-secret data. The secret portion would adopt the design proposed
 in this REP and the non-secret portion could be kept as-is, but there would need to be a way for the extension to
 provide metadata about the properties of the configuration schema.
@@ -332,12 +374,12 @@ Deletion of resources may require sequencing to avoid failures in deletion. The 
 approach to resource deletion, which means it will keep retrying all resources until they succeed within reasonable limits.
 If brute-force is not sufficient or there's common cases where ordering is necessary, the design may need modification to
 fetch the deployment dependency graph from the Deployments service after stack template deployment has completed and 
-persist it in the stack for later use. This is highly dependent on opaque extension-specific expectations.
+persist it in the stack for later use.
 
 ## Out of scope
 
 - Client support for root level deployments with extensions that require an extension configuration. A mechanism similar 
-to parameters files would be needed for each deployment client and it's not necessary for a minimal integration. There
+to parameters files would be needed for each deployment client, and it's not necessary for a minimal integration. There
 are other efforts of similar nature in progress, such as `.bicepdeploy` files.
 - Deployment stack resource locks on extension resources (in ARM, this is deny assignments that prevent deletion or 
 update of resources while being managed by the stack).
