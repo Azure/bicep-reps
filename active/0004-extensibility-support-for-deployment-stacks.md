@@ -30,7 +30,7 @@ Currently, Deployment stacks do not support managing extension resources deploye
 Deployment stacks will want to manage the lifecycle of any resource deployed through a stack regardless of its control
 plane as this is a key feature of stacks. 
 
-In order to minimally support deletion of extension resources which is the goal of this integration, changes need to 
+In order to minimally support deletion of extension resources which is the goal of this integration, changes need to be
 made at both the Bicep and ARM template levels to how extension configurations are defined so the Deployment stack 
 service can retrieve necessary secret data in a secure and direct way.
 
