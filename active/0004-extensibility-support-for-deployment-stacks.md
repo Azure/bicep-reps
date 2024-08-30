@@ -6,8 +6,6 @@ Feature Status: Public Preview
 Enhances: 0003
 ---
 
-<!-- Remove this comment and the prompts (in the form of blockquotes) for each section before submitting your PR -->
-
 # Integrating extensible resources with deployment stacks
 
 ## Summary
@@ -96,8 +94,8 @@ is transparent to the user and secure.
 ### The new design from the Bicep perspective
 
 The following Bicep code illustrates the new design for extension configurations. The root deployment supplies the
-extension configuration details to the child deployment, allowing direct access to ARM resources that supply secrets in 
-the root deployment.
+extension configuration details to the child deployment, allowing direct access to ARM resources in the root deployment
+that supply secrets.
 
 main.bicep - The root deployment
 ```bicep
@@ -150,7 +148,7 @@ Disallowed expressions:
 
 ### The new design from the ARM template perspective
 
-The main Bicep deployment would compile to the following ARM template following this paragraph. Only REP relevant data
+The main Bicep deployment would compile to the ARM template following this paragraph. Only REP relevant data
 is shown. The new "extensionConfigs" deployment property will be similar in style to how deployment parameters and type 
 definitions are defined in deployment templates. Configuration object property values can be literal values such as strings,
 booleans, and objects. Values can also be directives, such as to fetch a value from an ARM resource API. A directive
@@ -284,15 +282,13 @@ line for extensions that require configuration so at least the user is aware at 
 
 ### Resource deployment parameters
 
-The reason why extension configuration is moved to the deployment input is mostly due to needing to be able to
-reference ARM resources in a parent deployment as the source of truth for the configuration. When deployment parameters
-as they are today are used for extension configurations, there are more layers make assertions at for the expression
-constraints. In addition, it's not currently possible to define a deployment parameter as a reference to an ARM resource
-in a way that can be analyzed at template evaluation time. There are draft designs for this type of feature, but it is 
-not available at the start time of this document. Deployment parameters are currently limited to primitives and basic 
-types that do not provide enough engine-level metadata to make assertions about the source of a parameter value (for 
-example, how could it be known that a secure string parameter is always sourced from the AKS cluster admin credentials 
-in the Kubernetes example?).
+The reason why extension configuration is moved from a template to the deployment input is mostly due to needing to be able to
+reference ARM resources in a parent deployment as the source of truth for the configuration. It's not currently possible 
+to define a deployment parameter as a reference to an ARM resource in a way that can be analyzed at template evaluation time. 
+There are draft designs for this type of feature, but it is not available at the start time of this document. Deployment
+parameters are currently limited to primitives and basic types that do not provide enough engine-level metadata to make 
+assertions about the source of a parameter value (for example, how could it be known that a secure string parameter is 
+always sourced from the AKS cluster admin credentials in the Kubernetes example?).
 
 Resource deployment parameters, if designed in a way that enforces a certain resource type, would solve this issue, and
 there wouldn't be need to move the extension configuration definition site. Having this available would also solve the
@@ -351,7 +347,7 @@ disabled.
 
 ## Unresolved questions
 
-### Key vault secret expressions in extension configurations
+### Key vault secret expressions in extension configurations and other expression limitations driven by stacks
 
 Whether key vault secret access should be supported in extension configurations is a tricky subject. Users will likely
 want this feature, and it would work fine with a standalone deployment that isn't tethered to a stack because the secret
