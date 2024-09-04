@@ -313,6 +313,30 @@ extension kubernetes with {
 // ...
 ```
 
+### Use of existing resources
+
+The extension configuration could be kept as-is but restricted to existing resource reference expressions. There should
+not be a need to include this resource in the deployment GET response for stacks usage because it will be compiled to
+the new configuration format and embedded in that.
+
+Here is an example:
+```bicep
+param clusterName string
+param namespace string = 'default'
+
+// duplicates a resource definition, but leaves the extension config definition site unchanged
+resource aksCluster 'Microsoft.ContainerService/managedClusters@2024-02-01' existing = {
+  name: clusterName
+}
+
+extension kubernetes with {
+  kubeConfig: aksCluster.listClusterAdminCredential().kubeconfig[0].value
+  namespace: namespace
+}
+
+// ... 
+```
+
 ## Rollout plan
 
 The milestone for the initial rollout will be the successful deletion of extension resources through stacks. Supporting
