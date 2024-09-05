@@ -44,9 +44,6 @@ to constrain extension configurations to use constants or simple directives the 
 
 ## Detailed design
 
-> The core of the REP. Elaborate on the design and implementation with sufficient detail for someone familiar with Bicep
-to grasp. Provide detailed examples to illustrate how the feature is used and its implications on user experience.
-
 The key design change is to move where extension configurations are defined in Bicep and ARM templates. Currently,
 the extension configurations are defined within the deployment of the extension resources being deployed. This REP's 
 proposal is to move these configuration definitions to a dedicated deployment input property that is separate from 
@@ -99,6 +96,8 @@ that supply secrets.
 
 main.bicep - The root deployment
 ```bicep
+param namespace string = 'default'
+
 // The ARM aksCluster resource can supply kubeConfigs for the AKS Kubernetes use case.
 resource aksCluster '...' = {
   // ...
@@ -106,10 +105,10 @@ resource aksCluster '...' = {
 
 module extResources 'extResources.bicep' = {
   name: 'extResourcesDeploymentName'
-  extensionConfigs: {
+  extensions: {
     k8s: {
       kubeConfig: aksCluster.listClusterAdminCredential().kubeconfig[0].value
-      namespace: 'default'
+      namespace: namespace
     }
   }
   params: {
@@ -127,7 +126,7 @@ extension microsoftGraph // No config is needed for this one. This extension use
 // ... extension resources
 ```
 
-The keys of the "extensionConfigs" object are the extension aliases of the module deployment. If an alias is not provided,
+The keys of the "extensions" object are the extension aliases of the module deployment. If an alias is not provided,
 it will be the extension name. The values of the object are extension configurations. Optionality of configuration is
 determined by the extension. If this is compared to a typical resource group deployment, it is aligned because the
 resource group being deployed to is not defined within the deployment itself, but as a parameter to the deployment,
@@ -137,25 +136,70 @@ compiled to simple directives that both the deployments engine and the stacks se
 
 Allowed expressions:
 - ARM resource access that can be compiled to a resource ID (`aksCluster` in the example).
-- ARM resource API calls that can be compiled to a URI, HTTP method, and any inputs (`listClusterAdminCredential` in the example).
+- ARM resource API calls that can be compiled to a URI, HTTP method, and any inputs (`listClusterAdminCredential` in the
+  example).
 - JSON value accessors (`kubeconfig[0].value` in the example).
-- Usage of compile-time constants (the `0` in `kubeconfig[0]`, `namespace: 'default'` in the example).
+- Usage of compile-time constants (the `0` in `kubeconfig[0]` in the example).
+- Usage of non-secure deployment parameters (`namespace` value in the example).
 
 Disallowed expressions:
-- Usage of deployment parameters.
-- Usage of Bicep or ARM template functions (built-in or user defined).
-- Usage of branched expressions (ternaries).
+- Usage of secure deployment parameters.
+- For configuration properties that are marked as secret/secure (`kubeConfig` property in the example):
+    - Any expression that is not direct access on an ARM resource reference or complicates the analysis.
+
+The reasoning behind the disallowed expressions is because the "extensions" property will be evaluated by the deployment
+engine and the evaluation results will be returned in the deployment GET response. The stacks service will persist this
+data long-term and use it for the next stack update or deletion that requires extension resource deletions. These
+constraints will make it required that secret properties ("kubeConfig" in the Kubernetes example) are provided a value
+in an expected fashion like ARM resource APIs. It also prohibits usage of Bicep functions such as `loadFileContent` to
+inline load secret content.
+
+Examples of expression allowance for the `kubeConfig` case:
+```bicep
+@secure()
+param secureParam string
+
+param nonSecureParam string
+
+param boolParam bool
+
+resource aksCluster '...' = {
+  // ...
+}
+
+module extResources 'extResources.bicep' = {
+  name: 'extResourcesDeploymentName'
+  extensions: {
+    k8s: {
+     ✅ kubeConfig: aksCluster.listClusterAdminCredential().kubeconfig[0].value
+     ❌ kubeConfig: loadFileContent('kubeconfig.txt')
+     ❌ kubeConfig: secureParam
+     ❌ kubeConfig: nonSecureParam
+     ❔kubeConfig: userDefinedFunctionCall()
+     ❔kubeConfig: boolParam ? ... : aksCluster.listClusterAdminCredential().kubeconfig[0].value // depends on the complexity of detection of non-allowable sub expressions
+    }
+  }
+  params: {
+    // ...
+  }
+}
+```
+
+The expressions in question depend on how difficult it would be to detect usages of invalid expressions recursively.
+The deployments engine could evaluate these expressions out to values, but it would need to be able to determine the source
+of any data used to arrive at the final value to ensure secrets are not leaked. It may be best to only allow direct
+ARM resource access for secret config values initially and then expand allowance in future enhancements.
 
 ### The new design from the ARM template perspective
 
-The main Bicep deployment would compile to the ARM template following this paragraph. Only REP relevant data
-is shown. The new "extensionConfigs" deployment property will be similar in style to how deployment parameters and type 
-definitions are defined in deployment templates. Configuration object property values can be literal values such as strings,
-booleans, and objects. Values can also be directives, such as to fetch a value from an ARM resource API. A directive
-consists of one or more evaluation steps. The Bicep compiler will be responsible for converting template language 
-expressions to these directives that both the deployment service can and stacks service can process without need for 
-complex interpretation. The directives will not contain template language expressions to simplify any validation needed
-for acceptable directives.
+The main Bicep deployment would compile to the ARM template following this paragraph. Only REP relevant data is shown.
+The new "extensions" deployment property will be similar in style to how deployment parameters and type definitions are
+defined in deployment templates. Configuration object property values can be literal values such as strings, booleans,
+and objects. Values can also be directives, such as to fetch a value from an ARM resource API. A directive consists of
+one or more evaluation steps. The extensions property supplied to the deployment PUT will support language expressions
+that will be evaluated against the template defining the deployment. This allows for use of non-secure deployment
+parameters to fill in portions of the configuration (namespace, resource names). The Deployment engine will be
+responsible for validation expressions to ensure secret values are not processed in them.
 
 main.json - The root deployment
 ```json
@@ -166,22 +210,23 @@ main.json - The root deployment
          "apiVersion": "2022-09-01",
          "name": "extResourcesDeploymentName",
          "properties": {
-            "extensionConfigs": {
+            // Language expressions can be used. Expressions are not allowed to reference secure parameters or provide data for config secrets in ways that put the secret security at risk.
+            "extensions": {
                "k8s": {
                   "namespace": {
                      "type": "string",
-                     "value": "default"
+                     "value": "[parameters('namespace')]"
                   },
                   "kubeConfig": {
                      "type": "directive",
                      "evaluation": [
                         {
                            "type": "ArmApiCall",
-                           "resourceId": "/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/...",
+                           "resourceId": "[/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/...]",
                            "method": "GET",
                            "apiVersion": "2024-02-01",
                            "apiAction": "/listClusterAdminCredential",
-                           "query": "?a=1&b=2" // optional
+                           "query": "[?a=1&b=2]" // optional
                            "body": {} // optional
                         },
                         {
@@ -211,7 +256,8 @@ main.json - The root deployment
 
 This REP extends upon the API changes in REP 0003 by adding a configuration value to the extensions returned from
 a deployment GET. This configuration object will be the same as the configuration object described in the above ARM
-template design changes.
+template design changes but with template language expressions evaluated. The disallowed expression types will prevent
+sensitive data from showing up here.
 
 ```json
 {
@@ -223,6 +269,7 @@ template design changes.
          "version": "1.0.0",
          "deploymentId": "/subscriptions/.../resourceGroups/.../providers/Microsoft.Resources/deployments/...",
          "config": {
+            // the language expressions provided to the PUT have been evaluated
             "namespace": {
                "type": "string",
                "value": "default"
@@ -256,27 +303,40 @@ directives and returning all extension resources deployed in the template (acros
 service can process each extension resource and use the "deploymentId" and "extensionAlias" properties as a composite 
 key to the data in the extensions array.
 
+For now, directive steps can be expected to be of length 1 or 2, always beginning with a single ARM API call, and 1
+optional JSON path following an API call.
+
+### Directive evaluation failures
+
+The Deployments service will need to account for failures when executing directives. A deployment error will be returned
+if a failure is encountered. Failures can include invalid secrets, insufficient permissions, API errors, null reference 
+exceptions (during JSON path evaluation), and unsupported evaluation sequences.
+
+The Stacks service will also need to account for failures. Failures can include invalid secrets, insufficient permissions,
+transient API errors, null reference exceptions (during JSON path evaluation), and unsupported evaluation sequences 
+(deployments enhancements made but not yet supported by stacks).
+
+The errors should be clear to the user that it is something they can resolve, such as a stale user-provided secret, or
+if it's something the deployments team needs to look into. Errors should not leave the stack in a state the blocks the
+user from recovering.
+
 ## Drawbacks
 
-The biggest drawback of this approach is that extension configuration data cannot be sourced from deployment parameters.
-This design decision is driven solely to support the stacks user experience not needing to prompt for the parameter 
-values of the last stack deployment as user secrets cannot be persisted long term. This has the side effect of disallowing
-the use of non-secret parameters as well, such as the "namespace" in the Kubernetes extension use case. There could be
-a constraint to allow only non-secure parameter usage in extension configurations, but that could end up encouraging the
-user to work around that by not using secure parameters for data that should be secured. Alternatively, the secret portion
-of the extension configuration could be split into from non-secret data. The secret portion would adopt the design proposed
-in this REP and the non-secret portion could be kept as-is, but there would need to be a way for the extension to
-provide metadata about the properties of the configuration schema.
+The move of extension configuration definitions to the parent deployment properties along with the language expression
+constraints it imposes means that extension resources that require an extension configuration within the deployment PUT
+payload will no longer be deployable in a root deployment. There is no mechanism at the root level to provide this data.
+Client side changes would need to be implemented to accept extension configurations that conform to the expression
+rules. Another complication is how the user experience of templates would be affected. Because there's expectation that
+a parent deployment will supply extension configurations, it wouldn't be possible to provide a design-time error
+diagnostic in the extension resource deployment file until it is used as a root deployment. There needs to be
+documentation on expectations of deployment setup for these scenarios. One way to mitigate the problem in the UX
+directly is to provide a non-error diagnostic on the extension line for extensions that require configuration so at
+least the user is aware at the time of authoring.
 
-The move of extension configuration definitions to the parent deployment properties along with the language expression 
-constraints it imposes means that extension resources that require a configuration will no longer be deployable
-in a root deployment. There is no mechanism at the root level to provide this data. Client side changes would need to
-be implemented to accept extension configurations that conform to the expression rules. Another complication is how the 
-user experience of templates would be affected. Because there's expectation that a parent deployment will supply extension
-configurations, it wouldn't be possible to provide a design-time error diagnostic in the extension resource deployment
-file until it is used as a root deployment. There needs to be documentation on expectations of deployment setup for 
-these scenarios. One way to mitigate the problem in the UX directly is to provide a non-error diagnostic on the extension
-line for extensions that require configuration so at least the user is aware at the time of authoring.
+Needing to trace value sources in configuration expressions can be complex and change over time, leading to potential of
+secret data leaks. Therefore, allowed expression types should be very restrictively, at least for initial iterations.
+There also be sufficient diagnostics and validation to guard from workarounds the user might go for such as using
+non-secure parameters for secret data.
 
 ## Alternatives
 
@@ -371,7 +431,7 @@ disabled.
 
 ## Unresolved questions
 
-### Key vault secret expressions in extension configurations and other expression limitations driven by stacks
+### [Resolved] Key vault secret expressions in extension configurations and other expression limitations driven by stacks
 
 Whether key vault secret access should be supported in extension configurations is a tricky subject. Users will likely
 want this feature, and it would work fine with a standalone deployment that isn't tethered to a stack because the secret
@@ -381,12 +441,14 @@ the user did not properly maintain this secret and it's now invalid? This type o
 update of a stack when resources that no longer managed are to be deleted and potentially result in unexpected stack
 states. The errors would likely manifest as incidents for the stacks team to investigate.
 
+✅ Decision: Allow key vault sources and other ARM resource sources. Provide error detail to user if secret is invalid.
+
 ### Breaking up extension configurations into secret and non-secret components
 
 This question was arrived at in the drawbacks section. The extension would need to provide metadata about top-level 
 configuration properties to enable the various layers to differentiate secret versus non-secret properties. It would
 enable use of deployment parameters within non-secret portions of the extension configuration and stacks could persist
-these value.
+these values.
 
 ### Getting the resource dependency graph of a deployment
 
@@ -394,7 +456,8 @@ Deletion of resources may require sequencing to avoid failures in deletion. The 
 approach to resource deletion, which means it will keep retrying all resources until they succeed within reasonable limits.
 If brute-force is not sufficient or there's common cases where ordering is necessary, the design may need modification to
 fetch the deployment dependency graph from the Deployments service after stack template deployment has completed and 
-persist it in the stack for later use.
+persist it in the stack for later use. However, stacks service will need some type of brute force algorithm to account
+for problems opaque to the service.
 
 ## Out of scope
 
