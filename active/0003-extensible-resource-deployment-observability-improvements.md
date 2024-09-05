@@ -108,7 +108,6 @@ To improve the current structure where each `outputResources` object only has a 
       {
 +       "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
 +       "extensionAlias": "k8s",
-+       "extension": "Kubernetes",
 +       "symbolicName": "myService",
 +       "resourceType": "core/Service",
 +       "apiVersion": "v1",
@@ -218,7 +217,6 @@ supplied by the extension and any additional context needed to prevent possibili
   {
     "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
     "extensionAlias": "k8s",
-    "extension": "Kubernetes",
     "symbolicName": "myService",
     "resourceType": "core/Service",
     "apiVersion": "v1",
