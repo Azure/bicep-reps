@@ -204,11 +204,11 @@ To ensure a secure and controlled deployment of the API modifications, the rollo
 
 ## Unresolved questions
 
-### Provide a hash of extension resource identifiers
+### [Resolved] Provide a hash of extension resource identifiers
 
 The identifiers object of the extension resource object has an unpredictable schema as it's decided by the extension.
 This complicates assigning a key to the resource because equality contracts (with hashing) need to be established on 
-the key. If a hash were to be supplied to the user in the API, it would need be sourced from a serialized JSON string
+the key. If a string/hash were to be supplied to the user in the API, it would need be sourced from a serialized JSON string
 where the properties are recursively ordered with a stable sort. The JSON object would contain the identifiers object
 supplied by the extension and any additional context needed to prevent possibility of collision.
 
@@ -229,9 +229,11 @@ supplied by the extension and any additional context needed to prevent possibili
       },
       "serverHostHash": "60fd32871cbe255d5793ce9e6ebf628beba25224cde7104e6a302f474f2f656e"
     },
-+   "identifiersHash": "SHA-256 hash that can be used as a key"
++   "identifiersHash": "string/hash that can be used as a key for the extension resource"
   }
 ```
+
+> ✅ Decision was made to leave it up to the client.
 
 ### [Resolved] Consistent schema V.S. Minimum backend changes
 
