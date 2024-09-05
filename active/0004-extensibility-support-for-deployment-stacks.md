@@ -175,8 +175,9 @@ module extResources 'extResources.bicep' = {
      ❌ kubeConfig: loadFileContent('kubeconfig.txt')
      ❌ kubeConfig: secureParam
      ❌ kubeConfig: nonSecureParam
-     ❔kubeConfig: userDefinedFunctionCall()
-     ❔kubeConfig: boolParam ? ... : aksCluster.listClusterAdminCredential().kubeconfig[0].value // depends on the complexity of detection of non-allowable sub expressions
+     ❔ kubeConfig: userDefinedFunctionCall()
+     ❔ kubeConfig: boolParam ? ... : aksCluster.listClusterAdminCredential().kubeconfig[0].value // depends on the 
+     complexity of detection of non-allowable sub expressions
     }
   }
   params: {
@@ -203,7 +204,7 @@ extension kubernetes // this was provided a configuration through the parent dep
 
 module foo 'foo.bicep' = {
   extensions: {
-    kubernetes: kubernetes
+    kubernetes: kubernetes // pass down into another deployment
   }
 }
 ```
@@ -217,7 +218,7 @@ and objects. Values can also be directives, such as to fetch a value from an ARM
 one or more evaluation steps. The extensions property supplied to the deployment PUT will support language expressions
 that will be evaluated against the template defining the deployment. This allows for use of non-secure deployment
 parameters to fill in portions of the configuration (namespace, resource names). The Deployment engine will be
-responsible for validation expressions to ensure secret values are not processed in them.
+responsible for validation of expressions to ensure secret values are not processed in them.
 
 main.json - The root deployment
 ```json
@@ -356,8 +357,8 @@ directly is to provide a non-error diagnostic on the extension line for extensio
 least the user is aware at the time of authoring.
 
 Needing to trace value sources in configuration expressions can be complex and change over time, leading to potential of
-secret data leaks. Therefore, allowed expression types should be very restrictively, at least for initial iterations.
-There also be sufficient diagnostics and validation to guard from workarounds the user might go for such as using
+secret data leaks. Therefore, allowed expression types should be very restrictive, at least for initial iterations.
+There should also be sufficient diagnostics and validation to guard from workarounds the user might go for such as using
 non-secure parameters for secret data.
 
 ## Alternatives
