@@ -190,6 +190,24 @@ The deployments engine could evaluate these expressions out to values, but it wo
 of any data used to arrive at the final value to ensure secrets are not leaked. It may be best to only allow direct
 ARM resource access for secret config values initially and then expand allowance in future enhancements.
 
+#### Passing extension configurations to nested deployments
+
+Users will need to reuse extension configurations across multiple nested deployments. Because these are passed as
+deployment properties rather than as parameters, there needs to be a way to reference this configuration in the
+consuming deployment for the nested deployment.
+
+Here is an example of passing a configuration down another level:
+
+```bicep
+extension kubernetes // this was provided a configuration through the parent deployment
+
+module foo 'foo.bicep' = {
+  extensions: {
+    kubernetes: kubernetes
+  }
+}
+```
+
 ### The new design from the ARM template perspective
 
 The main Bicep deployment would compile to the ARM template following this paragraph. Only REP relevant data is shown.
@@ -252,6 +270,10 @@ main.json - The root deployment
 }
 ```
 
+#### Passing extension configurations to nested deployments
+
+TBD
+
 ### Microsoft.Resources/deployments API changes
 
 This REP extends upon the API changes in REP 0003 by adding a configuration value to the extensions returned from
@@ -304,7 +326,7 @@ service can process each extension resource and use the "deploymentId" and "exte
 key to the data in the extensions array.
 
 For now, directive steps can be expected to be of length 1 or 2, always beginning with a single ARM API call, and 1
-optional JSON path following an API call.
+optional JSON path following an API call. This can also be simplified down into the directive object if appropriate.
 
 ### Directive evaluation failures
 
@@ -458,6 +480,13 @@ If brute-force is not sufficient or there's common cases where ordering is neces
 fetch the deployment dependency graph from the Deployments service after stack template deployment has completed and 
 persist it in the stack for later use. However, stacks service will need some type of brute force algorithm to account
 for problems opaque to the service.
+
+### Limitations imposed on deployments due to stacks
+
+Deployments service does not need to evaluate extension configurations at a later time like stacks service does. This 
+means standalone deployments could have constraints lifted. Should constraints necessary for stacks be made generally or
+only for stack deployments? If only for stacks, how would the API payloads change and how would the end user UX inform
+users of stacks limitations?
 
 ## Out of scope
 
