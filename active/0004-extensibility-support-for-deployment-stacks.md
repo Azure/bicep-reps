@@ -221,59 +221,135 @@ parameters to fill in portions of the configuration (namespace, resource names).
 responsible for validation of expressions to ensure secret values are not processed in them.
 
 main.json - The root deployment
-```json
+```json5
 {
-   "resources": {
+  // root deployment
+  "template": {
+    "resources": {
       "extResources": {
-         "type": "Microsoft.Resources/deployments",
-         "apiVersion": "2022-09-01",
-         "name": "extResourcesDeploymentName",
-         "properties": {
-            // Language expressions can be used. Expressions are not allowed to reference secure parameters or provide data for config secrets in ways that put the secret security at risk.
-            "extensions": {
-               "k8s": {
-                  "namespace": {
-                     "type": "string",
-                     "value": "[parameters('namespace')]"
-                  },
-                  "kubeConfig": {
-                     "type": "directive",
-                     "evaluation": [
-                        {
-                           "type": "ArmApiCall",
-                           "resourceId": "[/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/...]",
-                           "method": "GET",
-                           "apiVersion": "2024-02-01",
-                           "apiAction": "/listClusterAdminCredential",
-                           "query": "[?a=1&b=2]" // optional
-                           "body": {} // optional
-                        },
-                        {
-                           "type": "JSONPath",
-                           "path": "kubeconfig[0].value"
-                        }
-                     ]
-                  }
-               }
-            },
-            "template": {
-               "extensions": {
-                  "k8s": {
-                     "extension": "Kubernetes",
-                     "version": "1.0.0"
-                     // "config" is removed, it's expected to be provided by properties of the deployment
-                  }
-               }
+        // Nested deployment
+        "type": "Microsoft.Resources/deployments",
+        "apiVersion": "2022-09-01",
+        "name": "extResourcesDeploymentName",
+        "properties": {
+          // Language expressions can be used. Expressions are not allowed to reference secure parameters or provide data for config secrets in ways that put the secret security at risk.
+          "extensionConfigs": {
+            "k8s": {
+              "type": "object",
+              // allowed types: "object", "inherit" (more on this in a further section)
+              "value": {
+                "namespace": {
+                  "type": "string",
+                  "value": "[parameters('namespace')]"
+                },
+                "kubeConfig": {
+                  "type": "directive",
+                  "evaluation": [
+                    {
+                      "type": "ArmApiCall",
+                      "resourceId": "[/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/...]",
+                      "method": "GET",
+                      "apiVersion": "2024-02-01",
+                      "apiAction": "/listClusterAdminCredential",
+                      "query": "[?a=1&b=2]",
+                      // optional
+                      "body": {}
+                      // optional
+                    },
+                    {
+                      "type": "JSONPath",
+                      "path": "kubeconfig[0].value"
+                    }
+                  ]
+                }
+              }
             }
-         }
+          },
+          "template": {
+            "extensions": {
+              "k8s": {
+                "extension": "Kubernetes",
+                "version": "1.0.0"
+                // "config" is removed, it's expected to be provided by properties of the deployment
+              }
+            }
+          }
+        }
       }
-   }
+    }
+  }
 }
 ```
 
 #### Passing extension configurations to nested deployments
 
-TBD
+There is an additional challenge when it is desired to pass an extension configuration down more than 1 level of 
+deployments. Deeply nested deployments should be able to inherit an extension configuration from a parent deployment.
+To enable this, in addition to supplying an object value for an extension configuration, an "inherit" value can be 
+provided. Here is an example:
+
+```json5
+{
+  // root deployment
+  "template": {
+    "resources": {
+      "extResources": {
+        // nested deployment (2nd level)
+        "type": "Microsoft.Resources/deployments",
+        "apiVersion": "2022-09-01",
+        "name": "extResourcesDeploymentName",
+        "properties": {
+          "extensionConfigs": {
+            "k8s": {
+              "type": "object",
+              "value": {
+                "namespace": {
+                  "type": "string",
+                  "value": "[parameters('namespace')]"
+                },
+                "kubeConfig": {
+                  // omitted for brevity
+                }
+              }
+            }
+          },
+          "template": {
+            "extensions": {
+              "k8s": {
+                "extension": "Kubernetes",
+                "version": "1.0.0"
+              }
+            },
+            "resources": {
+              "extResources2": {
+                // nested deployment (3rd level)
+                "type": "Microsoft.Resources/deployments",
+                "apiVersion": "2022-09-01",
+                "name": "extResourcesDeploymentName2",
+                "properties": {
+                  "extensionConfigs": {
+                    "kubernetes": {
+                      "type": "inherit",
+                      "value": "k8s" 
+                      // Inherit the already evaluated configuration of the 1st nested deployment.
+                      // The inline substitution will happen in the DeploymentResourceJob before the deployment is 
+                      // submitted.
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+When the DeploymentResourceJob runs on the third level nested deployment, there will be access to the second level
+deployment entity. By this time, the extension configuration for the second level deployment is already evaluated which
+enables an inline substitution to occur.
 
 ### Microsoft.Resources/deployments API changes
 
@@ -282,42 +358,42 @@ a deployment GET. This configuration object will be the same as the configuratio
 template design changes but with template language expressions evaluated. The disallowed expression types will prevent
 sensitive data from showing up here.
 
-```json
+```json5
 {
-   // ... deployment contract
-   "extensions": [
-      {
-         "name": "Kubernetes",
-         "alias": "k8s",
-         "version": "1.0.0",
-         "deploymentId": "/subscriptions/.../resourceGroups/.../providers/Microsoft.Resources/deployments/...",
-         "config": {
-            // the language expressions provided to the PUT have been evaluated
-            "namespace": {
-               "type": "string",
-               "value": "default"
+  // ... deployment contract
+  "extensions": [
+    {
+      "name": "Kubernetes",
+      "alias": "k8s",
+      "version": "1.0.0",
+      "deploymentId": "/subscriptions/.../resourceGroups/.../providers/Microsoft.Resources/deployments/...",
+      "config": {
+        // the language expressions provided to the PUT have been evaluated
+        "namespace": {
+          "type": "string",
+          "value": "default"
+        },
+        "kubeConfig": {
+          "type": "directive",
+          "evaluation": [
+            {
+              "type": "ArmApiCall",
+              "resourceId": "/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/...",
+              "method": "GET",
+              "apiVersion": "2024-02-01",
+              "apiAction": "/listClusterAdminCredential",
+              "query": "?a=1&b=2",
+              "body": {}
             },
-            "kubeConfig": {
-               "type": "directive",
-               "evaluation": [
-                  {
-                     "type": "ArmApiCall",
-                     "resourceId": "/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/...",
-                     "method": "GET",
-                     "apiVersion": "2024-02-01",
-                     "apiAction": "/listClusterAdminCredential",
-                     "query": "?a=1&b=2" // optional
-                     "body": { } // optional
-                  },
-                  {
-                     "type": "JSONPath",
-                     "path": "kubeconfig[0].value" // decompose?
-                  }
-               ]
+            {
+              "type": "JSONPath",
+              "path": "kubeconfig[0].value"
             }
-         }
+          ]
+        }
       }
-   ]
+    }
+  ]
 }
 ```
 
