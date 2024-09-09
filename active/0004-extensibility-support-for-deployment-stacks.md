@@ -632,6 +632,23 @@ fetch the deployment dependency graph from the Deployments service after stack t
 persist it in the stack for later use. However, stacks service will need some type of brute force algorithm to account
 for problems opaque to the service.
 
+It's important to note that deletion dependencies and Azure Deployment dependencies are two different concepts.
+Deployment dependencies define create-or-update dependencies. This means that resources can depend on each other simply
+by sourcing resource properties from other resource outputs, but this does not imply there is a container relationship
+between the resources. Deletion dependencies would be determined by container relationships. A container relationship in
+the context of deletion means that if the parent resource is deleted, the child resource is either deleted beforehand or
+will be an invalid state. An example of a container relationship is between Azure resource groups and resources.
+Deleting a resource group will delete the resources inside of it.
+
+There are two types of container relationships for extension resources:
+1. `ARM resource -> Extension resource` (example: AKS cluster for AKS resources)
+2. `Extension resource -> Extension resource`
+
+The ARM resource container case may be detectable if the ARM resource is used as input to the extension configuration.
+The extension resource container case is harder to detect. In the Kubernetes example, the extension resources reference
+each other with selectors which are defined in Bicep as a string field. There is no hard link between the resources at 
+the template level.
+
 ### Limitations imposed on deployments due to stacks
 
 Deployments service does not need to evaluate extension configurations at a later time like stacks service does. This 
