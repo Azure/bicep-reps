@@ -542,12 +542,18 @@ states. The errors would likely manifest as incidents for the stacks team to inv
 
 ✅ Decision: Allow key vault sources and other ARM resource sources. Provide error detail to user if secret is invalid.
 
-### Breaking up extension configurations into secret and non-secret components
+### [Resolved] Breaking up extension configurations into secret and non-secret components
 
 This question was arrived at in the drawbacks section. The extension would need to provide metadata about top-level 
 configuration properties to enable the various layers to differentiate secret versus non-secret properties. It would
 enable use of deployment parameters within non-secret portions of the extension configuration and stacks could persist
 these values.
+
+✅ The configuration schema will need to outline this to enable validation at both the Bicep and ARM template engine
+level to prevent secure leaks and allow use of non-secure deployment parameters. The extension config schema in Bicep
+appears hard coded for Kubernetes which can be changed. There does not appear to be special treatment of the Kubernetes
+plugin at the ARM template engine level, so will likely need to hard code support for now. Future source of schemas will
+be the extension registry?
 
 ### Getting the resource dependency graph of a deployment
 
