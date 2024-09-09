@@ -55,19 +55,6 @@ The `Microsoft.Resources/deployments` API will be updated to include an `extensi
   "type": "Microsoft.Resources/deployments",
   "properties": {
     ...
-    "providers": [
-      {
-        "namespace": "Microsoft.Storage",
-        "resourceTypes": [
-          {
-            "resourceType": "storageAccounts",
-            "locations": [
-              "eastus"
-            ]
-          }
-        ]
-      }
-    ],
 +   "extensions": [
 +     {
         // deploymentId is used to uniquely identify an extension since a nested deployment could import the same extension with the same alias.
