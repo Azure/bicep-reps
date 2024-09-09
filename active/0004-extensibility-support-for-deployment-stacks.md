@@ -209,6 +209,35 @@ module foo 'foo.bicep' = {
 }
 ```
 
+#### Providing extension configurations to root deployments
+
+Because the extension configuration will be an input property to the deployment, there needs to be a way for frontends
+to supply this data to a root deployment. The `biceparam` file type can be expanded to support defining extension 
+configurations with the same expression rules as extension configuration object blocks in module definitions.
+
+Here is an example:
+
+main.bicepparam
+```bicep
+using 'main.bicep'
+
+param boolParam = true
+// ...
+
+extensions {
+    k8s: {
+        ✅ kubeConfig: az.getAksKubeConfig(...) // any data needed to get it. Overloads may depend on auth workflow.
+        ❌ kubeConfig: loadFileContent('...')
+        ❌ kubeConfig: 'inlinedSecret'
+        namespace: 'default'
+    }
+}
+```
+
+If extensions require a configuration, there must be a parameters file (Bicep or JSON) that provide the extension 
+configuration. If it is not supplied, there should be appropriate error diagnostics. There will be no support for 
+inlining extension configurations from CLI arguments.
+
 ### The new design from the ARM template perspective
 
 The main Bicep deployment would compile to the ARM template following this paragraph. Only REP relevant data is shown.
@@ -351,6 +380,56 @@ When the DeploymentResourceJob runs on the third level nested deployment, there 
 deployment entity. By this time, the extension configuration for the second level deployment is already evaluated which
 enables an inline substitution to occur.
 
+#### Providing extension configurations to root deployments
+
+An "extensions" object will be added to the JSON parameters file. It will be required if the root deployment requires
+extension configurations. There will be no support for inlining of extension configuration by CLI arguments.
+
+Here is an example:
+
+main.parameters.json
+```json5
+{
+  "schema": "...",
+  "parameters": {
+    "boolParam": {
+      "value": "true"
+    }
+  },
+  "extensions": {
+    "k8s": {
+      "type": "object",
+      "value": {
+        "namespace": {
+          "type": "string",
+          "value": "default"
+        },
+        "kubeConfig": {
+          "type": "directive",
+          "evaluation": [
+            {
+              "type": "ArmApiCall",
+              "resourceId": "/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/...",
+              "method": "GET",
+              "apiVersion": "2024-02-01",
+              "apiAction": "/listClusterAdminCredential",
+              "query": "?a=1&b=2",
+              // optional
+              "body": {}
+              // optional
+            },
+            {
+              "type": "JSONPath",
+              "path": "kubeconfig[0].value"
+            }
+          ]
+        }
+      }
+    }
+  }
+}
+```
+
 ### Microsoft.Resources/deployments API changes
 
 This REP extends upon the API changes in REP 0003 by adding a configuration value to the extensions returned from
@@ -420,17 +499,6 @@ if it's something the deployments team needs to look into. Errors should not lea
 user from recovering.
 
 ## Drawbacks
-
-The move of extension configuration definitions to the parent deployment properties along with the language expression
-constraints it imposes means that extension resources that require an extension configuration within the deployment PUT
-payload will no longer be deployable in a root deployment. There is no mechanism at the root level to provide this data.
-Client side changes would need to be implemented to accept extension configurations that conform to the expression
-rules. Another complication is how the user experience of templates would be affected. Because there's expectation that
-a parent deployment will supply extension configurations, it wouldn't be possible to provide a design-time error
-diagnostic in the extension resource deployment file until it is used as a root deployment. There needs to be
-documentation on expectations of deployment setup for these scenarios. One way to mitigate the problem in the UX
-directly is to provide a non-error diagnostic on the extension line for extensions that require configuration so at
-least the user is aware at the time of authoring.
 
 Needing to trace value sources in configuration expressions can be complex and change over time, leading to potential of
 secret data leaks. Therefore, allowed expression types should be very restrictive, at least for initial iterations.
@@ -551,9 +619,9 @@ these values.
 
 ✅ The configuration schema will need to outline this to enable validation at both the Bicep and ARM template engine
 level to prevent secure leaks and allow use of non-secure deployment parameters. The extension config schema in Bicep
-appears hard coded for Kubernetes which can be changed. There does not appear to be special treatment of the Kubernetes
-plugin at the ARM template engine level, so will likely need to hard code support for now. Future source of schemas will
-be the extension registry?
+appears hard coded for Kubernetes which can be changed. There does not appear to be special validation of the Kubernetes
+plugin configuration at the ARM template engine level which will require some special validation added. Future source of
+schemas will be the extension registry?
 
 ### Getting the resource dependency graph of a deployment
 
