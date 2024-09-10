@@ -14,8 +14,6 @@ Introduces a new function to get the principal that is submitting the current de
 
 ## Terms and definitions
 
-> Include any terms, definitions, or acronyms that are used in this design document to assist the reader.
-
 ## Motivation
 
 Customers have expressed that having a function that can output properties about the current deployment principal would be helpful for [use-cases](#use-cases-expressed-by-customers) that require certain fields such as `objectId` (`principalId`). The current workarounds to achieve this are not desirable as these workarounds include running a prerequisite `az` command step to obtain the current principal's fields and then passing them into the Bicep template as parameters, e.g.
@@ -61,7 +59,9 @@ resource roleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 ### Client side changes
 We will expose a new function in the Bicep within the `az` namespace.
 ### Server side changes (if applicable)
-We will implement the new function as part of the Deployment Engine on the backend.
+We will implement the new function as part of the Deployment Engine on the backend. 
+Notably, there already exists a [DeploymentUserIdentifier](https://msazure.visualstudio.com/One/_git/AzureUX-Deployments?path=/src/Engine/Host/Azure/AzureDeploymentEngine.cs&version=GBmaster&line=671&lineEnd=672&lineStartColumn=1&lineEndColumn=1&lineStyle=plain&_a=contents), which is currently used for the secure outputs feature to check access permissions. We should reuse this class if possible, as it seems to represent what we need here. In that case, a refactor of the class and its usages may be needed to accommodate the new function.
+
 ### Examples
 
 - Assigning RBAC role
@@ -103,13 +103,16 @@ We will first roll out the backend changes to public & national clouds, and then
 ### Function name
 I chose `deployer()` because I think it's self-exlanatory (as a user I can easily tell that it means someone or something that deploys), but there are a few other good options discussed for naming the functions:
 1. `submitter()`
+   - this works, but I think we can achieve more clarity about what we are _submitting_ exactly with a better name
 1. `principal()`
-    - this was most upvoted on an earlier discussion, however there are some lingering concerns with vagueness with this one, i.e. is this the deployment principal?
+    - this was most upvoted on an earlier discussion, however there are some lingering concerns with vagueness with this one, i.e. is this the deployment principal or some other principal?
 1. `deploymentPrincipal()`
+   - this works too. It's just slightly longer than `deployer()` which seems to achieve the same meaning
 1. `whoami()`
+   - This works too; I can't think of any downside to using this?
 
 ### Do we need tenantId property?
-It is not clear which tenantId we would need (x-ms-home-tenant-id vs x-ms-client-tenant-id). In most cases these would be the same, however they would be different in cross-tenant scenarios e.g. Azure Lighthouse. In the cases where the tenantId property is required, e.g. Key Vault access policy, it makes sense for it to be the _resource's_ tenant (x-ms-home-tenant-id); it's not clear when a user's _home_ tenant (x-ms-client-tenant-id) specifically would need to be specified if the user is working in a cross-tenant scenario.  We had discussed omitting tenantId altogether to avoid confusion.
+It is not clear which tenantId we would need (x-ms-home-tenant-id vs x-ms-client-tenant-id. These are documented [here](https://github.com/Azure/azure-resource-manager-rpc/blob/master/v1.0/common-api-details.md#proxy-request-header-modifications)). In most cases these would be the same, however they would be different in cross-tenant scenarios e.g. Azure Lighthouse. In the cases where the tenantId property is required, e.g. Key Vault access policy, it makes sense for it to be the _resource's_ tenant (x-ms-home-tenant-id), in which case `subscription().tenantId` would suffice. It's not clear when a user's _home_ tenant (x-ms-client-tenant-id) specifically would need to be specified if the user is working in a cross-tenant scenario.  We had discussed omitting tenantId altogether to avoid confusion.
 
 ## Out of scope
 
