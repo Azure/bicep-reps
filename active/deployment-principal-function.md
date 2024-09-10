@@ -109,7 +109,7 @@ I chose `deployer()` because I think it's self-exlanatory (as a user I can easil
 1. `whoami()`
 
 ### Do we need tenantId property?
-It is not clear which tenantId we would need (home tenantId vs client tenantId). In most cases these would be the same, however they would be different in cross-tenant scenarios e.g. Azure Lighthouse. In the cases where the tenantId property is required, e.g. Key Vault access policy, it makes sense for it to be the _resource_ tenant against which authentication will be performed; it's not clear when a _home_ tenant specifically would need to be specified. We had discussed omitting tenantId altogether to avoid confusion.
+It is not clear which tenantId we would need (x-ms-home-tenant-id vs x-ms-client-tenant-id). In most cases these would be the same, however they would be different in cross-tenant scenarios e.g. Azure Lighthouse. In the cases where the tenantId property is required, e.g. Key Vault access policy, it makes sense for it to be the _resource's_ tenant (x-ms-home-tenant-id); it's not clear when a user's _home_ tenant (x-ms-client-tenant-id) specifically would need to be specified if the user is working in a cross-tenant scenario.  We had discussed omitting tenantId altogether to avoid confusion.
 
 ## Out of scope
 
