@@ -104,7 +104,7 @@ We will first roll out the backend changes to public & national clouds, and then
 I chose `deployer()` because I think it's self-exlanatory (as a user I can easily tell that it means someone or something that deploys), but there are a few other good options discussed for naming the functions:
 1. `submitter()`
 1. `principal()`
-    - there are some concerns with vagueness with this one, i.e. is this the deployment principal?
+    - this was most upvoted on an earlier discussion, however there are some lingering concerns with vagueness with this one, i.e. is this the deployment principal?
 1. `deploymentPrincipal()`
 1. `whoami()`
 
