@@ -91,7 +91,7 @@ resource keyvault 'Microsoft.KeyVault/vaults@2019-09-01' = {
 ```
 
 ## Drawbacks
-The minimal set of properties
+The minimal set of properties limits the function's utility to the aforementioned usecases. This is a deliberate design choice to avoid complexities involved with making Graph API calls.
 ## Alternatives
 
 ## Rollout plan
