@@ -238,7 +238,6 @@ To address the inconsistency in output resource schema between Azure resources a
 +       "apiVersion": "2020-01-01",
 +       "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
 +       "extensionAlias": "az",
-+       "extension": "AzureResourceManager"
       }
   }
 }
