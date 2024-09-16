@@ -1,9 +1,9 @@
 ﻿---
-REP Number: <Fill me in with a four-digit number matching the pull request number; Update AFTER PR is approved and BEFORE is merged.>
+REP Number: 0006
 Author: kalbert312 (Kyle Albert)
 Start Date: 2024-08-27
 Feature Status: Public Preview
-Enhances: 0003
+Enhances: 0008
 ---
 
 # Integrating extensible resources with deployment stacks
