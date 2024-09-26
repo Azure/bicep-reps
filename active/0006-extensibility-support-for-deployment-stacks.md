@@ -209,48 +209,34 @@ resource access for secret config values initially and then expand allowance in 
 
 #### Stacks mode for Bicep files
 
-##### As a Bicep statement
-
 Because the stack service will enable additional validation and features in the deployment service, Bicep template
 authors need to see diagnostics that flag disallowed expressions ahead of time. With the current Bicep file
 architecture, this cannot be determined automatically. Bicep files can be used with or without stacks and modules bind
 together different Bicep files to create a deployment hierarchy. To enable the additional diagnostics, they will need to
-be explicitly enabled by the template author. Here is the design for how to enable this in a Bicep file:
-
-```bicep
-compatibility stacks
-
-// some alternative nouns that express narrowing: restriction, constraint
-```
-
-The use of the noun "compatibility" fits in with the usage of noun keywords in Bicep. Bicep files that are compatible
-with stacks can be used as standalone deployments because the mode is more restrictive than the default mode. The intent
-for a compatibility statement is to express more restrictive validation scopes. If a compatibility target relaxed
-validation or introduced new features, then the file would no longer be deployable as a standalone deployment without
-the statement. Checking compatibility modes with what's driving the Bicep compiler (for example, a CLI deployment
-command or a CLI deployment stack command) could be an option, but validation relaxation or feature addition feels more
-in line with the concept of Bicep extensions.
-
-The compatibility statement will only affect Bicep compiler diagnostics. There will be no ARM template update that
-corresponds to this. If a user specifies the statement and deploys it as a stack, the extra validation on the
-Deployments engine backend will be triggered because the deployment request is coming from the Stacks service. The CLIs
-will need to be updated to compile Bicep in stacks mode when a template is submitted to prevent submitting templates
-that will certainly fail deployment.
-
-##### As a `bicepconfig.json` configuration
-
-Template authors, especially those who use stacks exclusively, may not want to repeat the Bicep statement option in all
-of their deployment files. To cover this, users can declare compatibility file rules in the Bicep config file:
+be explicitly enabled by the template author. Here is the design for how to enable this in a Bicep file via the Bicep
+linter:
 
 ```json5
 {
-  "compatibilityFileRules": {
-    "glob": ["stacks"],
-    "*.stack.bicep": ["stacks"],
-    "*": ["stacks"]
+  "rules": {
+    "stacks-compatibility": {
+      "level": "warning",
+      // The default level across all files. Up to user to configure as an error or to turn off.
+      "includedFiles": [
+        "*",
+        "<glob>"
+      ],
+      "levelOverrides": {
+        "*.stack.bicep": "error",
+        "<glob>": "error"
+      }
+    }
   }
 }
 ```
+
+There will be no ARM template changes to drive this. The extra validation on the backend will take place if the
+deployment is sent from the Stacks service.
 
 #### Passing extension configurations to nested deployments
 
