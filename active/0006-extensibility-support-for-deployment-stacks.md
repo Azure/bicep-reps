@@ -236,7 +236,8 @@ linter:
 ```
 
 There will be no ARM template changes to drive this. The extra validation on the backend will take place if the
-deployment is sent from the Stacks service.
+deployment is sent from the Stacks service. The Bicep compilation step for Stacks CLI commands should run with this mode
+set to "error" regardless of user setting to prevent templates that will certainly fail from being sent to the API.
 
 #### Passing extension configurations to nested deployments
 
