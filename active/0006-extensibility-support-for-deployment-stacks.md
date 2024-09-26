@@ -222,11 +222,7 @@ linter:
     "stacks-compatibility": {
       "level": "warning",
       // The default level across all files. Up to user to configure as an error or to turn off.
-      "includedFiles": [
-        "*",
-        "<glob>"
-      ],
-      "levelOverrides": {
+      "fileOverrides": {
         "*.stack.bicep": "error",
         "<glob>": "error"
       }
