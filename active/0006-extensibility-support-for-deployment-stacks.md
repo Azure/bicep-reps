@@ -128,13 +128,13 @@ extension microsoftGraph // No config is needed for this one. This extension use
 // ... extension resources
 ```
 
-The keys of the "extensions" object are the extension aliases of the module deployment. If an alias is not provided, it
-will be the extension name. The values of the object are extension configurations. Optionality of configuration is
-determined by the extension. If this is compared to a typical resource group deployment, it is aligned because the
-resource group being deployed to is not defined within the deployment itself, but as a parameter to the deployment,
-either through the CLI parameters or as a scope for nested deployments. In this example, the deployment scope(s) are
-being defined as extension configurations. Expressions in this object can be constrained to expressions that can be
-compiled to simple directives that both the deployments engine and the stacks service can execute.
+The keys of the "extensionConfigs" object are the extension aliases of the module deployment. If an alias is not
+provided, it will be the extension name. The values of the object are extension configurations. Optionality of
+configuration is determined by the extension. If this is compared to a typical resource group deployment, it is aligned
+because the resource group being deployed to is not defined within the deployment itself, but as a parameter to the
+deployment, either through the CLI parameters or as a scope for nested deployments. In this example, the deployment
+scope(s) are being defined as extension configurations. Expressions in this object can be constrained to expressions
+that can be compiled to simple directives that both the deployments engine and the stacks service can execute.
 
 Allowed expressions:
 
@@ -162,8 +162,8 @@ The disallowed expressions will only apply to deployments done from a stacks dep
 sends an HTTP request header to the deployments service. This will be used to enable additional validation in the
 Deployment engine to enforce these expression rules. It will also enable the return of extension configurations in the
 Deployment GET response for API versions that support it. For deployments that are not initiated by the stack service,
-the configuration portion of the extension details will not be returned, as it will likely contain secrets. In order
-to enforce this rule, if the deployment is made from the stacks service, then a boolean property persisted on the 
+the configuration portion of the extension details will not be returned, as it will likely contain secrets. In order to
+enforce this rule, if the deployment is made from the stacks service, then a boolean property persisted on the
 deployment entity or detail in the job metadata will indicate so to drive how extension configurations are persisted on
 the entity and returned from the GET API.
 
@@ -209,6 +209,8 @@ resource access for secret config values initially and then expand allowance in 
 
 #### Stacks mode for Bicep files
 
+##### As a Bicep statement
+
 Because the stack service will enable additional validation and features in the deployment service, Bicep template
 authors need to see diagnostics that flag disallowed expressions ahead of time. With the current Bicep file
 architecture, this cannot be determined automatically. Bicep files can be used with or without stacks and modules bind
@@ -230,8 +232,25 @@ command or a CLI deployment stack command) could be an option, but validation re
 in line with the concept of Bicep extensions.
 
 The compatibility statement will only affect Bicep compiler diagnostics. There will be no ARM template update that
-corresponds to this. If a user specifies the statement and deploys it as a stack, the extra validation on the 
-Deployments engine backend will be triggered because the deployment request is coming from the Stacks service.
+corresponds to this. If a user specifies the statement and deploys it as a stack, the extra validation on the
+Deployments engine backend will be triggered because the deployment request is coming from the Stacks service. The CLIs
+will need to be updated to compile Bicep in stacks mode when a template is submitted to prevent submitting templates
+that will certainly fail deployment.
+
+##### As a `bicepconfig.json` configuration
+
+Template authors, especially those who use stacks exclusively, may not want to repeat the Bicep statement option in all
+of their deployment files. To cover this, users can declare compatibility file rules in the Bicep config file:
+
+```json5
+{
+  "compatibilityFileRules": {
+    "glob": ["stacks"],
+    "*.stack.bicep": ["stacks"],
+    "*": ["stacks"]
+  }
+}
+```
 
 #### Passing extension configurations to nested deployments
 
@@ -371,7 +390,10 @@ provided. Here is an example:
                   "value": "[parameters('namespace')]"
                 },
                 "kubeConfig": {
-                  // omitted for brevity
+                  "type": "armApiCall",
+                  "value": "[listClusterAdminCredential(resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01').kubeconfigs[0].value]",
+                  // Alternatively, this may be decomposed into smaller properties, depending on implementation detail 
+                  // around this.
                 }
               }
             }
@@ -416,8 +438,8 @@ enables an inline substitution to occur.
 
 #### Providing extension configurations to root deployments
 
-An "extensions" object will be added to the JSON parameters file. It will be required if the root deployment requires
-extension configurations. There will be no support for inlining of extension configuration by CLI arguments.
+An "extensionConfigs" object will be added to the JSON parameters file. It will be required if the root deployment
+requires extension configurations. There will be no support for inlining of extension configuration by CLI arguments.
 
 Here is an example:
 
@@ -464,8 +486,8 @@ main.parameters.json
 
 This REP extends upon the API changes in REP 0008 by adding a configuration value to the extensions returned from a
 deployment GET. This configuration object will be similar to the configuration object described in the above ARM
-template design changes but with template language expressions evaluated and compiled to a format that can be
-relatively easily interpreted. The disallowed expression types will prevent sensitive data from showing up here.
+template design changes but with template language expressions evaluated and compiled to a format that can be relatively
+easily interpreted. The disallowed expression types will prevent sensitive data from showing up here.
 
 ```json5
 {
@@ -483,7 +505,8 @@ relatively easily interpreted. The disallowed expression types will prevent sens
           "value": "default"
         },
         "kubeConfig": {
-          "type": "armApiCall", // or keyVaultReference
+          "type": "armApiCall",
+          // or keyVaultReference
           "apiCall": {
             "method": "GET",
             "resourceId": "/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/...",
@@ -683,7 +706,7 @@ only for stack deployments? If only for stacks, how would the API payloads chang
 users of stacks limitations?
 
 ✅ Answer: Introduce a stacks mode for Bicep files that enables additional validation that is in-sync with backend
-validation. Only persist and display extension configurations for stacks deployments that have been successfully 
+validation. Only persist and display extension configurations for stacks deployments that have been successfully
 validated.
 
 ## Out of scope
