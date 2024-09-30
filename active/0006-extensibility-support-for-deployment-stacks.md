@@ -109,6 +109,7 @@ module extResources 'extResources.bicep' = {
   extensionConfigs: {
     k8s: {
       kubeConfig: aksCluster.listClusterAdminCredential().kubeconfig[0].value
+      kubeConfig: aksKubeConfig(aksCluster, 0) // alternative, if above is too difficult to validate
       namespace: namespace
     }
   }
@@ -188,6 +189,7 @@ module extResources 'extResources.bicep' = {
      // NOTE: ❌'s and ❔'s only apply to stacks based deployments. Regular deployments should be able to use any 
      // valid Bicep expression.
      ✅ kubeConfig: aksCluster.listClusterAdminCredential().kubeconfig[0].value
+     ✅ kubeConfig: aksKubeConfig(aksCluster, 0) // alternative, if above is too difficult to validate
      ❌ kubeConfig: loadFileContent('kubeconfig.txt')
      ❌ kubeConfig: secureParam
      ❌ kubeConfig: nonSecureParam
@@ -273,7 +275,7 @@ param boolParam = true
 
 extensionConfigs {
   k8s: {
-    ✅ kubeConfig: az.getAksKubeConfig(...) // any data needed to get it. Overloads may depend on auth workflow.
+    ✅ kubeConfig: az.aksKubeConfig(...) // any data needed to get it. Overloads may depend on auth workflow.
     ❌ kubeConfig: loadFileContent('...')
     ❌ kubeConfig: 'inlinedSecret'
     namespace: 'default'
@@ -321,11 +323,14 @@ main.json - The root deployment
                 },
                 "kubeConfig": {
                   "type": "armApiCall",
-                  "value": "[listClusterAdminCredential(resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01').kubeconfigs[0].value]",
-                  // Alternatively, this may be decomposed into smaller properties, depending on implementation detail 
-                  // around this.
-                  // When deployed as a stack, the value expression will be decomposed on the backend to acceptable 
-                  // formats returned by the deployment GET response. More on this in a further section.
+                  "apiReference": {
+                    "method": "GET",
+                    "resourceId": "[ /subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/... ]",
+                    "apiVersion": "2024-02-01",
+                    "path": "/listClusterAdminCredentials",
+                    "query": "[ ?a=1&b=2 ]",
+                    "valueJsonPath": "[ kubeconfig[0].value ]"
+                  }
                 }
               }
             }
@@ -374,9 +379,14 @@ provided. Here is an example:
                 },
                 "kubeConfig": {
                   "type": "armApiCall",
-                  "value": "[listClusterAdminCredential(resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01').kubeconfigs[0].value]",
-                  // Alternatively, this may be decomposed into smaller properties, depending on implementation detail 
-                  // around this.
+                  "apiReference": {
+                    "method": "GET",
+                    "resourceId": "[ /subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/... ]",
+                    "apiVersion": "2024-02-01",
+                    "path": "/listClusterAdminCredentials",
+                    "query": "[ ?a=1&b=2 ]",
+                    "valueJsonPath": "[ kubeconfig[0].value ]"
+                  }
                 }
               }
             }
@@ -455,9 +465,14 @@ main.parameters.json
         },
         "kubeConfig": {
           "type": "armApiCall",
-          "value": "[listClusterAdminCredential(resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01').kubeconfigs[0].value]",
-          // Alternatively, this may be decomposed into smaller properties, depending on implementation detail 
-          // around this.
+          "apiReference": {
+            "method": "GET",
+            "resourceId": "[ /subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/... ]",
+            "apiVersion": "2024-02-01",
+            "path": "/listClusterAdminCredentials",
+            "query": "[ ?a=1&b=2 ]",
+            "valueJsonPath": "[ kubeconfig[0].value ]"
+          },
         }
       }
     }
@@ -490,7 +505,7 @@ easily interpreted. The disallowed expression types will prevent sensitive data 
         "kubeConfig": {
           "type": "armApiCall",
           // or keyVaultReference
-          "apiCall": {
+          "apiReference": {
             "method": "GET",
             "resourceId": "/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/...",
             "apiVersion": "2024-02-01",
