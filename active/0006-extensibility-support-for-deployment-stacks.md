@@ -109,7 +109,6 @@ module extResources 'extResources.bicep' = {
   extensionConfigs: {
     k8s: {
       kubeConfig: aksCluster.listClusterAdminCredential().kubeconfig[0].value
-      kubeConfig: aksKubeConfig(aksCluster, 0) // alternative, if above is too difficult to validate
       namespace: namespace
     }
   }
@@ -189,7 +188,6 @@ module extResources 'extResources.bicep' = {
      // NOTE: ❌'s and ❔'s only apply to stacks based deployments. Regular deployments should be able to use any 
      // valid Bicep expression.
      ✅ kubeConfig: aksCluster.listClusterAdminCredential().kubeconfig[0].value
-     ✅ kubeConfig: aksKubeConfig(aksCluster, 0) // alternative, if above is too difficult to validate
      ❌ kubeConfig: loadFileContent('kubeconfig.txt')
      ❌ kubeConfig: secureParam
      ❌ kubeConfig: nonSecureParam
@@ -318,19 +316,12 @@ main.json - The root deployment
               // allowed types: "object", "inherit" (more on this in a further section)
               "value": {
                 "namespace": {
-                  "type": "string",
                   "value": "[parameters('namespace')]"
                 },
                 "kubeConfig": {
-                  "type": "armApiCall",
-                  "apiReference": {
-                    "method": "GET",
-                    "resourceId": "[ /subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/... ]",
-                    "apiVersion": "2024-02-01",
-                    "path": "/listClusterAdminCredentials",
-                    "query": "[ ?a=1&b=2 ]",
-                    "valueJsonPath": "[ kubeconfig[0].value ]"
-                  }
+                  "value": "[listClusterAdminCredential(resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01').kubeconfigs[0].value]",
+                  // When deployed as a stack, the value expression will be decomposed on the backend to acceptable 
+                  // formats returned by the deployment GET response. More on this in a further section.
                 }
               }
             }
@@ -339,8 +330,16 @@ main.json - The root deployment
             "extensions": {
               "k8s": {
                 "extension": "Kubernetes",
-                "version": "1.0.0"
-                // "config" is removed, it's expected to be provided by properties of the deployment
+                "version": "1.0.0",
+                "config": {
+                  "namespace": {
+                    "type": "string",
+                    "defaultValue": "default"
+                  },
+                  "kubeConfig": {
+                    "type": "secureString"
+                  }
+                }
               }
             }
           }
@@ -374,19 +373,12 @@ provided. Here is an example:
               "type": "object",
               "value": {
                 "namespace": {
-                  "type": "string",
                   "value": "[parameters('namespace')]"
                 },
                 "kubeConfig": {
-                  "type": "armApiCall",
-                  "apiReference": {
-                    "method": "GET",
-                    "resourceId": "[ /subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/... ]",
-                    "apiVersion": "2024-02-01",
-                    "path": "/listClusterAdminCredentials",
-                    "query": "[ ?a=1&b=2 ]",
-                    "valueJsonPath": "[ kubeconfig[0].value ]"
-                  }
+                  "value": "[listClusterAdminCredential(resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01').kubeconfigs[0].value]",
+                  // When deployed as a stack, the value expression will be decomposed on the backend to acceptable 
+                  // formats returned by the deployment GET response. More on this in a further section.
                 }
               }
             }
@@ -395,7 +387,16 @@ provided. Here is an example:
             "extensions": {
               "k8s": {
                 "extension": "Kubernetes",
-                "version": "1.0.0"
+                "version": "1.0.0",
+                "config": {
+                  "namespace": {
+                    "type": "string",
+                    "defaultValue": "default"
+                  },
+                  "kubeConfig": {
+                    "type": "secureString"
+                  }
+                }
               }
             },
             "resources": {
@@ -451,11 +452,9 @@ main.parameters.json
       "type": "object",
       "value": {
         "namespace": {
-          "type": "string",
           "value": "default"
         },
         "kubeConfig": {
-          "type": "keyVaultReference",
           "keyVaultReference": {
             "keyVault": {
               "id": "/..."
@@ -464,15 +463,9 @@ main.parameters.json
           }
         },
         "kubeConfig": {
-          "type": "armApiCall",
-          "apiReference": {
-            "method": "GET",
-            "resourceId": "[ /subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/... ]",
-            "apiVersion": "2024-02-01",
-            "path": "/listClusterAdminCredentials",
-            "query": "[ ?a=1&b=2 ]",
-            "valueJsonPath": "[ kubeconfig[0].value ]"
-          },
+          "value": "[listClusterAdminCredential(..., '2024-02-01').kubeconfigs[0].value]",
+          // When deployed as a stack, the value expression will be decomposed on the backend to acceptable 
+          // formats returned by the deployment GET response. More on this in a further section.
         }
       }
     }
@@ -485,7 +478,8 @@ main.parameters.json
 This REP extends upon the API changes in REP 0008 by adding a configuration value to the extensions returned from a
 deployment GET. This configuration object will be similar to the configuration object described in the above ARM
 template design changes but with template language expressions evaluated and compiled to a format that can be relatively
-easily interpreted. The disallowed expression types will prevent sensitive data from showing up here.
+easily interpreted. The disallowed expression types will prevent sensitive data from showing up here. The configuration
+will not be provided for non-stack deployments because there are no restricted expressions.
 
 ```json5
 {
