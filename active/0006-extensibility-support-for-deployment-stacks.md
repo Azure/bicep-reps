@@ -134,22 +134,21 @@ configuration is determined by the extension. If this is compared to a typical r
 because the resource group being deployed to is not defined within the deployment itself, but as a parameter to the
 deployment, either through the CLI parameters or as a scope for nested deployments. In this example, the deployment
 scope(s) are being defined as extension configurations. Expressions in this object can be constrained to expressions
-that can be compiled to simple directives that both the deployments engine and the stacks service can execute.
-
-Allowed expressions:
-
-- ARM resource access that can be compiled to a resource ID (`aksCluster` in the example).
-- ARM resource API calls that can be compiled to a URI, HTTP method, and any inputs (`listClusterAdminCredential` in the
-  example).
-- JSON value accessors (`kubeconfig[0].value` in the example).
-- Usage of compile-time constants (the `0` in `kubeconfig[0]` in the example).
-- Usage of non-secure deployment parameters (`namespace` value in the example).
+that can be compiled to simple directives that the stacks service can execute.
 
 Disallowed expressions ONLY for stacks deployments:
-
 - Usage of secure deployment parameters.
-- For configuration properties that are marked as secret/secure (`kubeConfig` property in the example):
-    - Any expression that is not direct access on an ARM resource reference or complicates the analysis.
+- For configuration properties that are known to be secure (`kubeConfig` property in the example) or are unknown to 
+  the engine and NOT any of the following:
+  - Key vault reference (resolved value not persisted, only the directive)
+  - Direct access to an ARM resource API call property or output property (resolved value not persisted, only the
+    directive)
+- For configuration properties that are known to be not secure and NOT any of the following:
+  - Literal value
+  - Parameter value (secure is already disallowed)
+  - Key vault reference (resolved value not persisted, only the directive)
+  - Direct access to an ARM resource API call response property or resource output property (resolved value not 
+    persisted, only the directive)
 
 The reasoning behind the disallowed expressions is because the "extensionConfigs" property will be evaluated by the
 deployment engine and the evaluation results will be returned in the deployment GET response. The stacks service will
@@ -177,6 +176,10 @@ param nonSecureParam string
 
 param boolParam bool
 
+resource kv 'Microsoft.KeyVaults/keyVault@...' = {
+  // ...
+}
+
 resource aksCluster '...' = {
   // ...
 }
@@ -188,12 +191,13 @@ module extResources 'extResources.bicep' = {
      // NOTE: ❌'s and ❔'s only apply to stacks based deployments. Regular deployments should be able to use any 
      // valid Bicep expression.
      ✅ kubeConfig: aksCluster.listClusterAdminCredential().kubeconfig[0].value
+     ✅ kubeConfig: kv.getSecret(...)
      ❌ kubeConfig: loadFileContent('kubeconfig.txt')
      ❌ kubeConfig: secureParam
      ❌ kubeConfig: nonSecureParam
+     ❔ kubeConfig: boolParam ? ... : aksCluster.listClusterAdminCredential().kubeconfig[0].value // allowable, but 
+     blocked by any non-determinism
      ❔ kubeConfig: userDefinedFunctionCall()
-     ❔ kubeConfig: boolParam ? ... : aksCluster.listClusterAdminCredential().kubeconfig[0].value // depends on the 
-     complexity of detection of non-allowable sub expressions
     }
   }
   params: {
@@ -222,6 +226,7 @@ linter:
     "stacks-compatibility": {
       "level": "warning",
       // The default level across all files. Up to user to configure as an error or to turn off.
+      // Alternative to file overrides is to stick with in-file/line overrides.
       "fileOverrides": {
         "*.stack.bicep": "error",
         "<glob>": "error"
@@ -266,14 +271,13 @@ main.bicepparam
 ```bicep
 using 'main.bicep'
 
-compatibility stacks
-
 param boolParam = true
 // ...
 
 extensionConfigs {
   k8s: {
     ✅ kubeConfig: az.aksKubeConfig(...) // any data needed to get it. Overloads may depend on auth workflow.
+    ✅ kubeConfig: getSecret(...)
     ❌ kubeConfig: loadFileContent('...')
     ❌ kubeConfig: 'inlinedSecret'
     namespace: 'default'
