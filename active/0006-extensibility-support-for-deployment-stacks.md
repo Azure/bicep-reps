@@ -146,9 +146,11 @@ Disallowed expressions ONLY for stacks deployments:
 - For configuration properties that are known to be not secure and NOT any of the following:
   - Literal value
   - Parameter value (secure is already disallowed)
-  - Key vault reference (resolved value not persisted, only the directive)
-  - Direct access to an ARM resource API call response property or resource output property (resolved value not 
-    persisted, only the directive)
+  - Direct access to an ARM resource GET API call (reference(...) call) response property or resource output property 
+    (resolved value is persisted, the directive to fetch will NOT be persisted)
+  - Note on key vault references and list*: These are disallowed because of behavioral differences. A literal value and
+    reference() value are resolved once and the resolved value is persisted. A key vault reference for instance would be
+    resolved again later which is a workflow difference.
 
 The reasoning behind the disallowed expressions is because the "extensionConfigs" property will be evaluated by the
 deployment engine and the evaluation results will be returned in the deployment GET response. The stacks service will
@@ -211,6 +213,14 @@ deployments engine could evaluate these expressions out to values, but it would 
 of any data used to arrive at the final value to ensure secrets are not leaked. It may be best to only allow direct ARM
 resource access for secret config values initially and then expand allowance in future enhancements.
 
+##### Limitations for extension config expressions
+
+The top-level object for an extension configuration must be expressed as an object literal (with brackets). No
+conditional expressions, function calls, or other disruptive expressions are allowed. This allows for the ARM template
+code generation to explicitly write out a top-level object with the properties of the extension config. The property
+names must be known at authoring time. Object spreading in the object literal only supports spreading another extension.
+For an example of this, see the section that addresses passing extension configs down to nested deployments.
+
 #### Stacks mode for Bicep files
 
 Because the stack service will enable additional validation and features in the deployment service, Bicep template
@@ -223,7 +233,7 @@ linter:
 ```json5
 {
   "rules": {
-    "stacks-compatibility": {
+    "stacks-extensibility-compatibility": { // break this down into smaller rules as needed
       "level": "warning",
       // The default level across all files. Up to user to configure as an error or to turn off.
       // Alternative to file overrides is to stick with in-file/line overrides.
@@ -249,11 +259,26 @@ consuming deployment for the nested deployment.
 Here is an example of passing a configuration down another level:
 
 ```bicep
-extension kubernetes // this was provided a configuration through the parent deployment
+extension kubernetes // this was provided a configuration through the parent deployment/parameters file
 
 module foo 'foo.bicep' = {
   extensionConfigs: {
-    kubernetes: kubernetes // pass down into another deployment
+    kubernetes: kubernetes // resuse its config, must be from an extension with the same name and version
+  }
+}
+```
+
+Here is an example with partial inheritance:
+
+```bicep
+extension kubernetes // this was provided a configuration through the parent deployment/parameters file
+
+module foo 'foo.bicep' = {
+  extensionConfigs: {
+    kubernetes: {
+       ...kubernetes,
+       namespace: 'myOtherNamespace'
+    }
   }
 }
 ```
@@ -316,8 +341,6 @@ main.json - The root deployment
           // Language expressions can be used. Expressions are not allowed to reference secure parameters or provide data for config secrets in ways that put the secret security at risk.
           "extensionConfigs": {
             "k8s": {
-              "type": "object",
-              // allowed types: "object", "inherit" (more on this in a further section)
               "value": {
                 "namespace": {
                   "value": "[parameters('namespace')]"
@@ -333,7 +356,7 @@ main.json - The root deployment
           "template": {
             "extensions": {
               "k8s": {
-                "extension": "Kubernetes",
+                "name": "Kubernetes",
                 "version": "1.0.0",
                 "config": {
                   "namespace": {
@@ -374,7 +397,6 @@ provided. Here is an example:
         "properties": {
           "extensionConfigs": {
             "k8s": {
-              "type": "object",
               "value": {
                 "namespace": {
                   "value": "[parameters('namespace')]"
@@ -390,7 +412,7 @@ provided. Here is an example:
           "template": {
             "extensions": {
               "k8s": {
-                "extension": "Kubernetes",
+                "name": "Kubernetes",
                 "version": "1.0.0",
                 "config": {
                   "namespace": {
@@ -412,11 +434,11 @@ provided. Here is an example:
                 "properties": {
                   "extensionConfigs": {
                     "kubernetes": {
-                      "type": "inherit",
-                      "value": "k8s"
+                      "inherit": "k8s",
                       // Inherit the already evaluated configuration of the 1st nested deployment.
                       // The inline substitution will happen in the DeploymentResourceJob before the deployment is 
                       // submitted.
+                      "value": { } // optional overrides to apply to the inheritance
                     }
                   }
                 }
@@ -453,7 +475,6 @@ main.parameters.json
   },
   "extensionConfigs": {
     "k8s": {
-      "type": "object",
       "value": {
         "namespace": {
           "value": "default"
@@ -467,9 +488,14 @@ main.parameters.json
           }
         },
         "kubeConfig": {
-          "value": "[listClusterAdminCredential(..., '2024-02-01').kubeconfigs[0].value]",
-          // When deployed as a stack, the value expression will be decomposed on the backend to acceptable 
-          // formats returned by the deployment GET response. More on this in a further section.
+          "apiReference": {
+            "method": "POST",
+            "armResourceId": "/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/...",
+            "apiVersion": "2024-02-01",
+            "action": "listClusterAdminCredentials",
+            "query": "a=1&b=2",
+            "responseValuePath": "kubeconfigs[0].value"
+          }
         }
       }
     }
@@ -501,15 +527,15 @@ will not be provided for non-stack deployments because there are no restricted e
           "value": "default"
         },
         "kubeConfig": {
-          "type": "armApiCall",
+          "type": "securestring",
           // or keyVaultReference
           "apiReference": {
-            "method": "GET",
-            "resourceId": "/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/...",
+            "method": "POST",
+            "armResourceId": "/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/...",
             "apiVersion": "2024-02-01",
-            "path": "/listClusterAdminCredentials",
-            "query": "?a=1&b=2",
-            "valueJsonPath": "kubeconfig[0].value"
+            "action": "listClusterAdminCredentials",
+            "query": "a=1&b=2",
+            "responseValuePath": "kubeconfigs[0].value"
           }
         }
       }
@@ -572,7 +598,7 @@ param aksCluster Resource<'Microsoft.ContainerService/managedClusters@2024-02-01
 param namespace string = 'default'
 
 extension kubernetes with {
-  kubeConfig: aksCluster.listClusterAdminCredential().kubeconfig[0].value
+  kubeConfig: aksCluster.listClusterAdminCredential().kubeconfigs[0].value
   namespace: namespace
 }
 
@@ -597,7 +623,7 @@ resource aksCluster 'Microsoft.ContainerService/managedClusters@2024-02-01' exis
 }
 
 extension kubernetes with {
-  kubeConfig: aksCluster.listClusterAdminCredential().kubeconfig[0].value
+  kubeConfig: aksCluster.listClusterAdminCredential().kubeconfigs[0].value
   namespace: namespace
 }
 
