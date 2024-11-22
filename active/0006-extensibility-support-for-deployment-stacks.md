@@ -108,7 +108,9 @@ module extResources 'extResources.bicep' = {
   name: 'extResourcesDeploymentName'
   extensionConfigs: {
     k8s: {
-      kubeConfig: aksCluster.listClusterAdminCredential().kubeconfig[0].value
+      auth: {
+        kubeConfig: aksCluster.listClusterAdminCredential().kubeconfigs[0].value
+      },
       namespace: namespace
     }
   }
@@ -136,37 +138,73 @@ deployment, either through the CLI parameters or as a scope for nested deploymen
 scope(s) are being defined as extension configurations. Expressions in this object can be constrained to expressions
 that can be compiled to simple directives that the stacks service can execute.
 
-Disallowed expressions ONLY for stacks deployments:
-- Usage of secure deployment parameters.
-- For configuration properties that are known to be secure (`kubeConfig` property in the example) or are unknown to 
-  the engine and NOT any of the following:
-  - Key vault reference (resolved value not persisted, only the directive)
-  - Direct access to an ARM resource API call property or output property (resolved value not persisted, only the
-    directive)
-- For configuration properties that are known to be not secure and NOT any of the following:
-  - Literal value
-  - Parameter value (secure is already disallowed)
-  - Direct access to an ARM resource GET API call (reference(...) call) response property or resource output property 
-    (resolved value is persisted, the directive to fetch will NOT be persisted)
-  - Note on key vault references and list*: These are disallowed because of behavioral differences. A literal value and
-    reference() value are resolved once and the resolved value is persisted. A key vault reference for instance would be
-    resolved again later which is a workflow difference.
+The "auth" property at the root level of an extension configuration is a reserved property across all extensions. If an 
+extension supports non-Azure based auth that requires passing raw credentials to it from a deployment, the extension 
+must define a schema for the "auth" property. The "auth" property schema must be an object and can have nested objects. 
+Properties in the "auth" object follow strict validation rules when the deployment occurs as a Deployment stack deployment.
+There are no specialized validation rules for non-Deployment stack deployments. 
 
-The reasoning behind the disallowed expressions is because the "extensionConfigs" property will be evaluated by the
-deployment engine and the evaluation results will be returned in the deployment GET response. The stacks service will
-persist this data long-term and use it for the next stack update or deletion that requires extension resource deletions.
-These constraints will make it required that secret properties ("kubeConfig" in the Kubernetes example) are provided a
-value in an expected fashion like ARM resource APIs. It also prohibits usage of Bicep functions such as
-`loadFileContent` to inline load secret content.
+Below are a couple tables outlining allowable expression value types for extension configuration properties. Note that
+expression value type means the type of the final value of an evaluated expression. This means that `'aString'`
+and `boolParam ? 'aString' : 'bString'` are the same expression value type.
 
-The disallowed expressions will only apply to deployments done from a stacks deployment. The stacks service already
-sends an HTTP request header to the deployments service. This will be used to enable additional validation in the
-Deployment engine to enforce these expression rules. It will also enable the return of extension configurations in the
-Deployment GET response for API versions that support it. For deployments that are not initiated by the stack service,
-the configuration portion of the extension details will not be returned, as it will likely contain secrets. In order to
-enforce this rule, if the deployment is made from the stacks service, then a boolean property persisted on the
-deployment entity or detail in the job metadata will indicate so to drive how extension configurations are persisted on
-the entity and returned from the GET API.
+Legend: 
+- ✅: Allowed expression value type
+- ❌: Disallowed expression value type
+- 💾: Resolved expression value saved long-term for later consumption by Deployment stacks
+- 🔄️: Directive to re-fetch expression value is saved long-term for later consumption by Deployment stacks
+
+Expression types inside the "auth" object:
+
+| Expression Value Type                  | Non-stack deployment | Stack deployment |
+|----------------------------------------|----------------------|------------------|
+| Literal value                          | ✅                    | ❌                |
+| Non-secure deployment parameter        | ✅                    | ❌                |
+| Secure deployment parameter            | ✅                    | ❌                |
+| Key vault reference                    | ✅                    | ✅ 🔄️            |
+| Resource output property (reference()) | ✅                    | ❌                |
+| LIST* output property                  | ✅                    | ✅ 🔄️            |
+| All other expression value types       | ✅                    | ❌                |
+
+Expression types NOT inside the "auth" object:
+
+| Expression Value Type                  | Non-stack deployment | Stack deployment |
+|----------------------------------------|----------------------|------------------|
+| Literal value                          | ✅                    | ✅ 💾             | 
+| Non-secure deployment parameter        | ✅                    | ✅ 💾             |
+| Secure deployment parameter            | ✅                    | ❌                |
+| Key vault reference                    | ✅                    | ❌ <sup>(1)</sup> |
+| Resource output property (reference()) | ✅                    | ✅ 💾             |
+| LIST* output property                  | ✅                    | ❌ <sup>(2)</sup> |
+| All other expression value types       | ✅                    | ✅ 💾             |
+
+<sup>(1)</sup> Stacks cannot persist secrets which is what Key vaults are designed to hold, so we'd need to persist 
+the directive. For the time being, Stacks will only support re-fetching "auth" properties because of this and that
+secrets are more likely to change over time. This encourages an anti-pattern for key vaults by using them for
+non-secret data, but this is probably not something the Deployments team needs to be concerned about. This could be
+permissible but there should be a way for the user to differentiate saving resolved values and saving the directive to
+re-fetch the value. Example: `namespace: kv.getSecret('xyz')` vs `namespace: () => kv.getSecret('xyz')`. In the 
+first case, the reference is resolved and the resolved value is persisted. In the second example, the reference is 
+persisted.
+
+<sup>(2)</sup> Disallowed because of the save vs re-fetch workflow difference between "auth" and non-"auth". There 
+should be a way to differentiate these behaviors by the Bicep/ARM template author. See <sup>(1)</sup>. Alternatively
+this can be enabled to allow sourcing non-secret data and if secret data is used, it is user error.
+
+The reasoning behind the disallowed expressions for stack deployments is because the extension configuration properties
+will be evaluated by the deployment engine and the evaluation results will be returned in the deployment GET response.
+The stacks service will persist this data long-term and use it for the next stack update or deletion that requires
+extension resource deletions. These constraints will make it required that auth properties ("kubeConfig" in the
+Kubernetes example) are provided in way where a directive to re-fetch can be computed and saved. It also prohibits 
+usage of Bicep functions such as `loadFileContent` to inline load secret content.
+
+The stacks service already sends a stack resource ID HTTP request header to the deployments service. This will be used
+to enable additional validation in the Deployment engine to enforce these expression rules. It will also enable the
+return of extension configurations in the Deployment GET response for API versions that support it. The stack resource
+ID will be saved on the deployment metadata and this will be used to drive these features. For deployments that are not
+initiated by the stack service, the configuration portion of the extension details will not be returned, as no 
+additional validation on language expressions is done, which means we cannot guarantee compliance to the ARM RP RPC rule
+that a resource GET cannot return secret data.
 
 Examples of expression allowance for the `kubeConfig` case:
 
@@ -192,14 +230,14 @@ module extResources 'extResources.bicep' = {
     k8s: {
      // NOTE: ❌'s and ❔'s only apply to stacks based deployments. Regular deployments should be able to use any 
      // valid Bicep expression.
-     ✅ kubeConfig: aksCluster.listClusterAdminCredential().kubeconfig[0].value
+     ✅ kubeConfig: aksCluster.listClusterAdminCredential().kubeconfigs[0].value
      ✅ kubeConfig: kv.getSecret(...)
      ❌ kubeConfig: loadFileContent('kubeconfig.txt')
      ❌ kubeConfig: secureParam
      ❌ kubeConfig: nonSecureParam
-     ❔ kubeConfig: boolParam ? ... : aksCluster.listClusterAdminCredential().kubeconfig[0].value // allowable, but 
-     blocked by any non-determinism
-     ❔ kubeConfig: userDefinedFunctionCall()
+     ✅ kubeConfig: boolParam ? ... : aksCluster.listClusterAdminCredential().kubeconfigs[0].value // allowable, so 
+     long as the branches that can be travelled down after short-circuiting are an allowable expression
+     ❌ kubeConfig: userDefinedFunctionCall()
     }
   }
   params: {
@@ -210,11 +248,11 @@ module extResources 'extResources.bicep' = {
 
 The expressions in question depend on how difficult it would be to detect usages of invalid expressions recursively. The
 deployments engine could evaluate these expressions out to values, but it would need to be able to determine the source
-of any data used to arrive at the final value to ensure secrets are not leaked. It may be best to only allow direct ARM
-resource access for secret config values initially and then expand allowance in future enhancements.
+of any data used to arrive at the final value to ensure secrets are not leaked.
 
 ##### Limitations for extension config expressions
 
+<!-- TODO(kylealbert): rework this for language expression based extension config --> 
 The top-level object for an extension configuration must be expressed as an object literal (with brackets). No
 conditional expressions, function calls, or other disruptive expressions are allowed. This allows for the ARM template
 code generation to explicitly write out a top-level object with the properties of the extension config. The property
@@ -341,15 +379,15 @@ main.json - The root deployment
           // Language expressions can be used. Expressions are not allowed to reference secure parameters or provide data for config secrets in ways that put the secret security at risk.
           "extensionConfigs": {
             "k8s": {
-              "value": {
-                "namespace": {
-                  "value": "[parameters('namespace')]"
-                },
+              "auth": { // "auth" is a reserved property
                 "kubeConfig": {
                   "value": "[listClusterAdminCredential(resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01').kubeconfigs[0].value]",
                   // When deployed as a stack, the value expression will be decomposed on the backend to acceptable 
                   // formats returned by the deployment GET response. More on this in a further section.
                 }
+              },
+              "namespace": {
+                "value": "[parameters('namespace')]"
               }
             }
           },
@@ -665,6 +703,19 @@ The rollout:
 1. Collaborate with the Portal team to update the deployments blade, ensuring that the UI reflects the API changes.
 
 ## Unresolved questions
+
+### Expression differentiation for persisting the value versus persisting the directive/reference
+
+This was highlighted in a footnote of the allowable expressions inside of extension configurations. Should Bicep offer a
+way to differentiate the workflow of resolving a reference and persisting the resolved value versus the workflow of
+persisting the reference and using it to re-fetch later? For a non-stack Deployment, there is no semantic difference
+between the two, but there is a distinction to be made for stacks. This would also tie into Bicep lint diagnostics. See
+the below table for examples.
+
+| Stack behavior after deployment GET         | Bicep Expression                       |
+|---------------------------------------------|----------------------------------------|
+| Persisting the resolved value               | `namespace: kv.getSecret('xyz')`       |
+| Persisting the reference and re-fetch later | `namespace: () => kv.getSecret('xyz')` |
 
 ### [Resolved] Key vault secret expressions in extension configurations and other expression limitations driven by stacks
 
