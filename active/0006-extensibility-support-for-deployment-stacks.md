@@ -369,16 +369,74 @@ inlining extension configurations from CLI arguments.
 
 ### The new design from the ARM template perspective
 
-The `"extensionConfigs"` deployment property is a mapping of extension aliases to extension configurations. Each extension
-configuration is split into two properties for the purposes of validation and handling of data:
+#### Providing extension configurations to root deployments
+
+An `"extensionConfigs"` object will be added to the JSON parameters file. There will be no support for inlining of 
+extension configuration by CLI, so this is the only way to provide extension configurations.
+
+Here is an example:
+
+main.parameters.json
+
+```json5
+{
+  "schema": "...",
+  "parameters": {
+    "boolParam": {
+      "value": "true"
+    }
+  },
+  "extensionConfigs": {
+    "k8s": {
+      "auth": {
+        "kubeConfig": {
+          "keyVaultReference": {
+            "keyVault": {
+              "id": "/..."
+            },
+            "secretName": "myKubeConfig"
+          }
+        },
+        // OR
+        "kubeConfig": {
+          "apiReference": {
+            "method": "POST",
+            "armResourceId": "/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/...",
+            "apiVersion": "2024-02-01",
+            "action": "listClusterAdminCredentials",
+            "query": "a=1&b=2",
+            "responseValuePath": "kubeconfigs[0].value"
+          }
+        }
+      },
+      "namespace": {
+        "value": "default"
+      }
+    }
+  }
+}
+```
+
+The above format effectively defines the signature of the `"extensionConfigs"` object accepted by the deployment PUT API.
+The `"extensionConfigs"` object is a mapping of extension aliases (as defined in the deployment template) to extension
+configurations. Each extension configuration is an object. The properties of the object are defined by the extension schema.
+For example, the Kubernetes extension defines `auth.kubeConfig` and `namespace`. The values of the properties are an
+object with 3 different possible properties, all mutually exclusive from each other:
+
+1. `"value"`: a literal value (string, number, bool, object, etc)
+1. `"keyVaultReference"`: a reference to a key vault secret
+1. `"apiReference"`: a reference to ARM resource API output
+
+#### Nested deployment extension configurations
+
+The `"extensionConfigs"` deployment property is a mapping of extension aliases to extension configurations. Each
+extension configuration in a template's nested deployment properties is split into two properties for the purposes of
+validation and handling of data:
+
 1. `"value"`
 1. `"auth"`
 
-Below is an example template followed by specifications for each property.
-
-#### Root deployment template example
-
-The main Bicep deployment above would compile to the below ARM template. Only REP relevant data is shown.
+Below is an example ARM template followed by specifications for each property. Only REP relevant data is shown.
 
 main.json - The root deployment
 
@@ -485,6 +543,10 @@ passed to the extension during deployment will be:
 }
 ```
 
+The language expression based format with `"auth"` and `"value"` properties is only valid and the only acceptable format
+when defining an extension configuration for a template's nested deployment properties. It will be transformed to the
+root deployment format before the nested deployment PUT.
+
 #### Passing extension configurations to nested deployments
 
 There is an additional challenge when it is desired to pass an extension configuration down more than 1 level of
@@ -570,55 +632,6 @@ Parameters to this function must be resolvable at preprocessing time for validat
 language expression context, not just extension configurations. If the extension alias cannot be resolved to an extension,
 a validation error will be thrown. If the portion returned by the function would be null or not defined by the extension
 config schema, the function will return null.
-
-#### Providing extension configurations to root deployments
-
-**TODO(kylealbert): rework this for language expression based extension config?**
-
-An "extensionConfigs" object will be added to the JSON parameters file. It will be required if the root deployment
-requires extension configurations. There will be no support for inlining of extension configuration by CLI arguments.
-
-Here is an example:
-
-main.parameters.json
-
-```json5
-{
-  "schema": "...",
-  "parameters": {
-    "boolParam": {
-      "value": "true"
-    }
-  },
-  "extensionConfigs": {
-    "k8s": {
-      "value": {
-        "namespace": {
-          "value": "default"
-        },
-        "kubeConfig": {
-          "keyVaultReference": {
-            "keyVault": {
-              "id": "/..."
-            },
-            "secretName": "myKubeConfig"
-          }
-        },
-        "kubeConfig": {
-          "apiReference": {
-            "method": "POST",
-            "armResourceId": "/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/...",
-            "apiVersion": "2024-02-01",
-            "action": "listClusterAdminCredentials",
-            "query": "a=1&b=2",
-            "responseValuePath": "kubeconfigs[0].value"
-          }
-        }
-      }
-    }
-  }
-}
-```
 
 ### Microsoft.Resources/deployments API changes
 
