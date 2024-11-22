@@ -23,6 +23,9 @@ extension resources with Deployment stacks.
 - `Deployment stack`/`stack`: An atomic unit for lifecycle management of a set of resources deployed by a Bicep or ARM
   template deployment. Resources can be Azure resources or extension resources. Stacks can unmanage resources which
   results in either their deletion or detachment from the stack.
+- `Secure`/`secret`/`auth`: These terms may be used interchangeably to indicate secure portions of data for extension
+  configurations in particular.
+- `Non-secure`: Any data that is not considered a secret that can be persisted or exposed without risk.
 
 ## Motivation
 
@@ -156,27 +159,27 @@ Legend:
 
 Expression types inside the "auth" object:
 
-| Expression Value Type                  | Non-stack deployment | Stack deployment |
-|----------------------------------------|----------------------|------------------|
-| Literal value                          | ✅                    | ❌                |
-| Non-secure deployment parameter        | ✅                    | ❌                |
-| Secure deployment parameter            | ✅                    | ❌                |
-| Key vault reference                    | ✅                    | ✅ 🔄️            |
-| Resource output property (reference()) | ✅                    | ❌                |
-| LIST* output property                  | ✅                    | ✅ 🔄️            |
-| All other expression value types       | ✅                    | ❌                |
+| Expression Value Type                  | Non-stack deployment  | Stack deployment |
+|----------------------------------------|:---------------------:|:----------------:|
+| Literal value                          |           ✅           |        ❌         |
+| Non-secure deployment parameter        |           ✅           |        ❌         |
+| Secure deployment parameter            |           ✅           |        ❌         |
+| Key vault reference                    |           ✅           |      ✅ 🔄️       |
+| Resource output property (reference()) |           ✅           |        ❌         |
+| LIST* output property                  |           ✅           |      ✅ 🔄️       |
+| All other expression value types       |           ✅           |        ❌         |
 
 Expression types NOT inside the "auth" object:
 
 | Expression Value Type                  | Non-stack deployment | Stack deployment |
-|----------------------------------------|----------------------|------------------|
-| Literal value                          | ✅                    | ✅ 💾             | 
-| Non-secure deployment parameter        | ✅                    | ✅ 💾             |
-| Secure deployment parameter            | ✅                    | ❌                |
-| Key vault reference                    | ✅                    | ❌ <sup>(1)</sup> |
-| Resource output property (reference()) | ✅                    | ✅ 💾             |
-| LIST* output property                  | ✅                    | ❌ <sup>(2)</sup> |
-| All other expression value types       | ✅                    | ✅ 💾             |
+|----------------------------------------|:--------------------:|:----------------:|
+| Literal value                          |          ✅           |       ✅ 💾       | 
+| Non-secure deployment parameter        |          ✅           |       ✅ 💾       |
+| Secure deployment parameter            |          ✅           |        ❌         |
+| Key vault reference                    |          ✅           | ❌ <sup>(1)</sup> |
+| Resource output property (reference()) |          ✅           |       ✅ 💾       |
+| LIST* output property                  |          ✅           | ❌ <sup>(2)</sup> |
+| All other expression value types       |          ✅           |       ✅ 💾       |
 
 <sup>(1)</sup> Stacks cannot persist secrets which is what Key vaults are designed to hold, so we'd need to persist 
 the directive. For the time being, Stacks will only support re-fetching "auth" properties because of this and that
@@ -200,11 +203,11 @@ usage of Bicep functions such as `loadFileContent` to inline load secret content
 
 The stacks service already sends a stack resource ID HTTP request header to the deployments service. This will be used
 to enable additional validation in the Deployment engine to enforce these expression rules. It will also enable the
-return of extension configurations in the Deployment GET response for API versions that support it. The stack resource
-ID will be saved on the deployment metadata and this will be used to drive these features. For deployments that are not
-initiated by the stack service, the configuration portion of the extension details will not be returned, as no 
-additional validation on language expressions is done, which means we cannot guarantee compliance to the ARM RP RPC rule
-that a resource GET cannot return secret data.
+return of extension configurations in the Deployment GET response for API versions that support it. This header is only
+needed for the initial deployment PUT, as its value will be saved on the deployment metadata and this will be used to
+drive the API behavior. For deployments that are not initiated by the stack service, the configuration portion of the
+extension details will not be returned, as no additional validation on language expressions is done, which means we
+cannot guarantee compliance to the ARM RP RPC rule that a resource GET cannot return secret data.
 
 Examples of expression allowance for the `kubeConfig` case:
 
@@ -252,7 +255,8 @@ of any data used to arrive at the final value to ensure secrets are not leaked.
 
 ##### Limitations for extension config expressions
 
-<!-- TODO(kylealbert): rework this for language expression based extension config --> 
+**TODO(kylealbert): rework this for language expression based extension config**
+
 The top-level object for an extension configuration must be expressed as an object literal (with brackets). No
 conditional expressions, function calls, or other disruptive expressions are allowed. This allows for the ARM template
 code generation to explicitly write out a top-level object with the properties of the extension config. The property
@@ -294,7 +298,7 @@ Users will need to reuse extension configurations across multiple nested deploym
 deployment properties rather than as parameters, there needs to be a way to reference this configuration in the
 consuming deployment for the nested deployment.
 
-Here is an example of passing a configuration down another level:
+Here are some examples of passing a configuration down another level:
 
 ```bicep
 extension kubernetes // this was provided a configuration through the parent deployment/parameters file
@@ -304,18 +308,27 @@ module foo 'foo.bicep' = {
     kubernetes: kubernetes // resuse its config, must be from an extension with the same name and version
   }
 }
-```
 
-Here is an example with partial inheritance:
-
-```bicep
-extension kubernetes // this was provided a configuration through the parent deployment/parameters file
-
-module foo 'foo.bicep' = {
+// spread inheritance
+module bar 'foo.bicep' = {
   extensionConfigs: {
     kubernetes: {
-       ...kubernetes,
+       ...kubernetes, // must be an extension with the same name and version
        namespace: 'myOtherNamespace'
+    }
+  }
+}
+
+// piecemeal inheritance
+module baz 'foo.bicep' = {
+  extensionConfigs: {
+    kubernetes: { 
+       namespace: kuberetes.namespace
+       auth: kubernetes.auth // must be for an extension with the same name and version?
+       // alternatively for auth, or other objects:
+       auth: {
+         kubeConfig: kubernetes.auth.kubeConfig
+       } 
     }
   }
 }
@@ -339,10 +352,12 @@ param boolParam = true
 
 extensionConfigs {
   k8s: {
-    ✅ kubeConfig: az.aksKubeConfig(...) // any data needed to get it. Overloads may depend on auth workflow.
-    ✅ kubeConfig: getSecret(...)
-    ❌ kubeConfig: loadFileContent('...')
-    ❌ kubeConfig: 'inlinedSecret'
+    auth: {
+      ✅ kubeConfig: az.aksKubeConfig(...) // any data needed to get it. Overloads may depend on auth workflow.
+      ✅ kubeConfig: getSecret(...)
+      ❌ kubeConfig: loadFileContent('...')
+      ❌ kubeConfig: 'inlinedSecret'
+    }
     namespace: 'default'
   }
 }
@@ -354,14 +369,16 @@ inlining extension configurations from CLI arguments.
 
 ### The new design from the ARM template perspective
 
-The main Bicep deployment would compile to the ARM template following this paragraph. Only REP relevant data is shown.
-The "extensionConfigs" deployment property will be similar in style to how deployment parameters and type definitions
-are defined in deployment templates. Configuration object property values can be literal values such as strings,
-booleans, and objects. Values can also be directives, such as to fetch a value from an ARM resource API. A directive
-consists of one or more evaluation steps. The extensions property supplied to the deployment PUT will support language
-expressions that will be evaluated against the template defining the deployment. This allows for use of non-secure
-deployment parameters to fill in portions of the configuration (namespace, resource names). The Deployment engine will
-be responsible for validation of expressions to ensure secret values are not processed in them.
+The `"extensionConfigs"` deployment property is a mapping of extension aliases to extension configurations. Each extension
+configuration is split into two properties for the purposes of validation and handling of data:
+1. `"value"`
+1. `"auth"`
+
+Below is an example template followed by specifications for each property.
+
+#### Root deployment template example
+
+The main Bicep deployment above would compile to the below ARM template. Only REP relevant data is shown.
 
 main.json - The root deployment
 
@@ -379,16 +396,9 @@ main.json - The root deployment
           // Language expressions can be used. Expressions are not allowed to reference secure parameters or provide data for config secrets in ways that put the secret security at risk.
           "extensionConfigs": {
             "k8s": {
-              "auth": { // "auth" is a reserved property
-                "kubeConfig": {
-                  "value": "[listClusterAdminCredential(resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01').kubeconfigs[0].value]",
-                  // When deployed as a stack, the value expression will be decomposed on the backend to acceptable 
-                  // formats returned by the deployment GET response. More on this in a further section.
-                }
-              },
-              "namespace": {
-                "value": "[parameters('namespace')]"
-              }
+              "auth": "[createObject('kubeConfig', listClusterAdminCredential(resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01').kubeconfigs[0].value)]",
+              "value": "[createObject('namespace', parameters('namespace'))]",
+              // The "value" object will be merged with the "auth" object on the backend before interacting with the extension.
             }
           },
           "template": {
@@ -415,12 +425,76 @@ main.json - The root deployment
 }
 ```
 
+#### Specification for the "value" property
+
+This property contains all the non-authorization/secure properties for an extension config. It can only be omitted or
+set to null if the extension schema does not define non-secure properties, or all non-secure properties have default
+values.
+
+The language expression must evaluate out to an object that conforms to the extension config schema. Language
+expressions are subject to the non-secure validation rules for Deployment stack deployments as outlined the above Bicep
+design section. For stack deployments, properties within "value" are always resolved once and the resolved value is
+persisted.
+
+This property only exists so the non-secure portion of the configuration can be represented as a language expression in
+the ARM template. This property's object value will serve as root base object of the actual extension config passed to
+the extension. See the common specification section below for more details on the final extension config is derived.
+
+Any data provided for this property will be exposed via the deployment GET API for Deployments stack deployments. Any
+future modification to built-in language expression functions will need to be considered for validation blocks. Keeping
+an allow list of specific functions will not be realistic to maintain, and a deny list for this feature will also be
+difficult to keep accurate, so it may be ideal to flag built-in functions as a certain source of secure data.
+Alternatively, this can be left to the responsibility of the template author.
+
+#### Specification for the "auth" property
+
+This property contains all the secure properties for an extension config. It can only be omitted if the extension schema
+does not declare secure/auth properties. If it is present, null is always an invalid value.
+
+Language expressions are subject to the secure validation rules for Deployment stack deployments as outlined the
+above Bicep design section. For stack deployments, properties within "auth" are always persisted as directives/references 
+to be re-fetched later.
+
+#### Common specification for both the "value" and "auth" properties
+
+At template preprocessing time, the language expression must evaluate out minimally to an object with all of its
+property names recursively available. Non-evaluable expressions (like reference calls) within the expression will be
+replaced with sentinel expressions in order to make the expression evaluable. This is so preprocessing validation can
+validate required properties have a value, dangling config properties are addressed, and default values can be merged.
+This means that reference call sourced objects cannot be used for extension config property names and cannot be spread
+onto extension configs. Preprocessing will do as much validation as it can, but for language expressions that are only
+resolvable in the deployment jobs, errors will surface only during deployment, such as value sourced from a reference
+expression that is of the wrong type. Because replacing non-evaluable portions affects short-circuiting, expressions that
+involve short-circuiting/branching that prevent deriving the object property names may need to be restricted.
+
+The two properties will be merged into a single object representing the extension configuration that will eventually be
+passed to the extension. The "value" object will serve as the base object to merge into. If it's not provided or is
+null, an empty object will take its place. Then, the "auth" object, if non-null, will merge into the "value" object as a property
+called "auth". If the "value" object contained a property named "auth", it will be silently overwritten. If the "value"
+object contains an "auth" property and the extension does not accept this property, it will be silently discarded. 
+
+Using the above template example's "extensionConfigs", the final merged extension configuration for extension "k8s"
+passed to the extension during deployment will be:
+
+```json5
+{
+  "auth": {
+    "kubeConfig": "<secret>"
+  },
+  "namespace": "default" // the "namespace" property is lifted out of the "value" property in the template into this root object
+}
+```
+
 #### Passing extension configurations to nested deployments
 
 There is an additional challenge when it is desired to pass an extension configuration down more than 1 level of
 deployments. Deeply nested deployments should be able to inherit an extension configuration from a parent deployment. To
-enable this, in addition to supplying an object value for an extension configuration, an "inherit" value can be
-provided. Here is an example:
+enable this, a new built-in ARM template function `extensionConfigs(string extAlias, string? portion)'` is added to
+access parent deployment extension configurations. The `extAlias` parameter is the extension alias as defined in the 
+template, and the optional `portion` parameter is either `auth` or `value` (the default) and is used determine what portion
+of the configuration is returned by the function. The `portion` parameter is necessary for validation.
+ 
+Here is an example:
 
 ```json5
 {
@@ -434,24 +508,16 @@ provided. Here is an example:
         "name": "extResourcesDeploymentName",
         "properties": {
           "extensionConfigs": {
-            "k8s": {
-              "value": {
-                "namespace": {
-                  "value": "[parameters('namespace')]"
-                },
-                "kubeConfig": {
-                  "value": "[listClusterAdminCredential(resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01').kubeconfigs[0].value]",
-                  // When deployed as a stack, the value expression will be decomposed on the backend to acceptable 
-                  // formats returned by the deployment GET response. More on this in a further section.
-                }
-              }
+            "k8s": { // what we will inherit
+              "auth": "[createObject('kubeConfig', listClusterAdminCredential(resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01').kubeconfigs[0].value)]",
+              "value": "[createObject('namespace', parameters('namespace'))]", // this comes from the root deployment parameters
             }
           },
           "template": {
             "extensions": {
               "k8s": {
                 "name": "Kubernetes",
-                "version": "1.0.0",
+                "version": "3.0.0",
                 "config": {
                   "namespace": {
                     "type": "string",
@@ -472,13 +538,17 @@ provided. Here is an example:
                 "properties": {
                   "extensionConfigs": {
                     "kubernetes": {
-                      "inherit": "k8s",
-                      // Inherit the already evaluated configuration of the 1st nested deployment.
-                      // The inline substitution will happen in the DeploymentResourceJob before the deployment is 
-                      // submitted.
-                      "value": { } // optional overrides to apply to the inheritance
+                      "auth": "[extensionConfigs('k8s', 'auth')]",
+                      "value": "[extensionConfigs('k8s')]", // or [extensionConfigs('k8s', 'value')]
                     }
-                  }
+                  },
+                  "template": {
+                    "extensions": {
+                      "kubernetes": {
+                        // assume same extension name and version as "k8s", thus same schema, so it's valid to inherit from k8s
+                      },
+                    }
+                  }      
                 }
               }
             }
@@ -492,9 +562,18 @@ provided. Here is an example:
 
 When the DeploymentResourceJob runs on the third level nested deployment, there will be access to the second level
 deployment entity. By this time, the extension configuration for the second level deployment is already evaluated which
-enables an inline substitution to occur.
+enables substitution to occur.
+
+In order to conform to the validation rules laid out in the Bicep design section, the `extensionConfigs` function with
+parameter `portion` set to `'auth'` is prohibited from being used within the `"value"` property of the extension config.
+Parameters to this function must be resolvable at preprocessing time for validation. The function will be usable in any
+language expression context, not just extension configurations. If the extension alias cannot be resolved to an extension,
+a validation error will be thrown. If the portion returned by the function would be null or not defined by the extension
+config schema, the function will return null.
 
 #### Providing extension configurations to root deployments
+
+**TODO(kylealbert): rework this for language expression based extension config?**
 
 An "extensionConfigs" object will be added to the JSON parameters file. It will be required if the root deployment
 requires extension configurations. There will be no support for inlining of extension configuration by CLI arguments.
