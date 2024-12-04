@@ -102,6 +102,9 @@ main.bicep - The root deployment
 ```bicep
 param namespace string = 'default'
 
+// A sample key vault
+resource kv '...' = { } 
+
 // The ARM aksCluster resource can supply kubeConfigs for the AKS Kubernetes use case.
 resource aksCluster '...' = {
   // ...
@@ -111,9 +114,24 @@ module extResources 'extResources.bicep' = {
   name: 'extResourcesDeploymentName'
   extensionConfigs: {
     k8s: {
-      auth: {
-        kubeConfig: aksCluster.listClusterAdminCredential().kubeconfigs[0].value
-      },
+      // a kubeConfig sourced from an ARM resource (AKS cluster):
+      kubeConfig: {
+        source: 'ResourceSecret'
+        resource: aksCluster
+        credentialType: 'Admin' // or user
+      }
+      // a kubeConfig sourced from a Key Vault:
+      kubeConfig: {
+        source: 'KeyVault'
+        keyVault: kv // a key vault resource symbol defined in the template
+        secretName: 'myKubeConfig'
+      }
+      // a kubeConfig sourced from a user expression:
+      kubeConfig: {
+        source: 'Custom'
+        value: aksCluster.listClusterAdminCredential().kubeconfigs[0].value
+      } 
+      // namespace sourced from a deployment parameter
       namespace: namespace
     }
   }
@@ -134,72 +152,89 @@ extension microsoftGraph // No config is needed for this one. This extension use
 ```
 
 The keys of the "extensionConfigs" object are the extension aliases of the module deployment. If an alias is not
-provided, it will be the extension name. The values of the object are extension configurations. Optionality of
-configuration is determined by the extension. If this is compared to a typical resource group deployment, it is aligned
-because the resource group being deployed to is not defined within the deployment itself, but as a parameter to the
-deployment, either through the CLI parameters or as a scope for nested deployments. In this example, the deployment
-scope(s) are being defined as extension configurations. Expressions in this object can be constrained to expressions
-that can be compiled to simple directives that the stacks service can execute.
+provided, it will be the extension name. The values of the object are extension configurations and the schema of the
+object is determined by the extension. Optionality of configuration is determined by the extension. The example shown
+above is how configurations are represented in Bicep and this representation will be transformed into the actual
+extension configuration in the Deployments backend. There is a difference because to support stack deployments,
+instructions on how to fetch secure portions of the configuration must be persisted.
 
-The "auth" property at the root level of an extension configuration is a reserved property across all extensions. If an 
-extension supports non-Azure based auth that requires passing raw credentials to it from a deployment, the extension 
-must define a schema for the "auth" property. The "auth" property schema must be an object and can have nested objects. 
-Properties in the "auth" object follow strict validation rules when the deployment occurs as a Deployment stack deployment.
-There are no specialized validation rules for non-Deployment stack deployments. 
+As for the extension configuration declaration site change, if this is compared to a typical resource group deployment,
+it is aligned because the resource group being deployed to is not defined within the deployment template itself, but as a
+parameter to the deployment, either through the CLI parameters or as a scope for nested deployments. In this example,
+the deployment scope(s) for extensible resources are the extension configurations.
 
-Below are a couple tables outlining allowable expression value types for extension configuration properties. Note that
-expression value type means the type of the final value of an evaluated expression. This means that `'aString'`
-and `boolParam ? 'aString' : 'bString'` are the same expression value type.
+The non-secure values of the configuration are supplied with Bicep expressions. Secure parameters cannot be used for their
+value.
+
+The secure values of the configuration ("kubeConfig" in the example) are represented as references to the source of the
+value. A reference must be an object literal with a source and required properties for that source. For the first 
+implementation, there will be 3 possible sources:
+
+Legend:
+- ✅: Allowed
+- ❌: Not allowed (error)
+
+| Source   | Description                                                                     | Stack deployments |
+|----------|---------------------------------------------------------------------------------|-------------------|
+| KeyVault | The secret is retrieved from an Azure Key Vault.                                | ✅                 |
+| Resource | The secret is retrieved from an Azure resource through its REST API.            | ✅                 |
+| Custom   | The secret value is sourced directly from the custom Bicep expression provided. | ❌                 |
+
+It will not be possible to conditionally define these references (such as KeyVault or a Custom sourced secret based on
+deployment parameters) or use object spreads in them because the underlying format of these reference objects will not 
+be represented as an ARM template language expression. Only the values of non-secure properties or values inside the 
+reference object will be represented as language expressions. If a template author wishes to switch between sources, they
+can utilize conditional deployment modules.
+
+**For stack deployments, any language expressions present in extension configurations must be constrained to prevent
+persisting user secrets long-term and causing security risks. There are no restrictions for non-stack deployments.** Below
+are a couple tables outlining allowable language expression value types for extension configurations. Note that
+expression value type means the type of the final value of an evaluated expression. This means that `'aString'`and
+`boolParam ? 'aString' : 'bString'` are the same expression value type.
 
 Legend: 
 - ✅: Allowed expression value type
-- ❌: Disallowed expression value type
+- ❌: Disallowed expression value type (error)
 - 💾: Resolved expression value saved long-term for later consumption by Deployment stacks
 - 🔄️: Directive to re-fetch expression value is saved long-term for later consumption by Deployment stacks
 
-Expression types inside the "auth" object:
+Expression types for secure property reference values:
 
-| Expression Value Type                  | Non-stack deployment  | Stack deployment |
-|----------------------------------------|:---------------------:|:----------------:|
-| Literal value                          |           ✅           |        ❌         |
-| Non-secure deployment parameter        |           ✅           |        ❌         |
-| Secure deployment parameter            |           ✅           |        ❌         |
-| Key vault reference                    |           ✅           |      ✅ 🔄️       |
-| Resource output property (reference()) |           ✅           |        ❌         |
-| LIST* output property                  |           ✅           |      ✅ 🔄️       |
-| All other expression value types       |           ✅           |        ❌         |
+| Expression Value Type                  | Stack deployment |
+|----------------------------------------|:-----------------|
+| Literal value                          | ❌                |
+| Non-secure deployment parameter        | ❌                |
+| Secure deployment parameter            | ❌                |
+| Key vault reference                    | ✅ 🔄️            |
+| Resource output property (reference()) | ❌                |
+| LIST* output property                  | ✅ 🔄️            |
+| All other expression value types       | ❌                |
 
-Expression types NOT inside the "auth" object:
+Expression types for non-secure properties:
 
-| Expression Value Type                  | Non-stack deployment | Stack deployment |
-|----------------------------------------|:--------------------:|:----------------:|
-| Literal value                          |          ✅           |       ✅ 💾       | 
-| Non-secure deployment parameter        |          ✅           |       ✅ 💾       |
-| Secure deployment parameter            |          ✅           |        ❌         |
-| Key vault reference                    |          ✅           | ❌ <sup>(1)</sup> |
-| Resource output property (reference()) |          ✅           |       ✅ 💾       |
-| LIST* output property                  |          ✅           | ❌ <sup>(2)</sup> |
-| All other expression value types       |          ✅           |       ✅ 💾       |
+| Expression Value Type                  | Stack deployment    |
+|----------------------------------------|:--------------------|
+| Literal value                          | ✅ 💾                | 
+| Non-secure deployment parameter        | ✅ 💾                |
+| Secure deployment parameter            | ❌                   |
+| Key vault reference                    | ❌ <sup>(1)</sup>    |
+| Resource output property (reference()) | ✅ 💾                |
+| LIST* output property                  | ✅ 💾 <sup>(2)</sup> |
+| All other expression value types       | ✅ 💾 <sup>(2)</sup> |
 
-<sup>(1)</sup> Stacks cannot persist secrets which is what Key vaults are designed to hold, so we'd need to persist 
-the directive. For the time being, Stacks will only support re-fetching "auth" properties because of this and that
-secrets are more likely to change over time. This encourages an anti-pattern for key vaults by using them for
-non-secret data, but this is probably not something the Deployments team needs to be concerned about. This could be
-permissible but there should be a way for the user to differentiate saving resolved values and saving the directive to
-re-fetch the value. Example: `namespace: kv.getSecret('xyz')` vs `namespace: () => kv.getSecret('xyz')`. In the 
-first case, the reference is resolved and the resolved value is persisted. In the second example, the reference is 
-persisted.
+<sup>(1)</sup>Stacks will only support re-fetching secure properties because of secrets cannot be persisted and that
+secrets are more likely to change over time. Allowing a reference for a non-secure property introduces a subtle workflow
+difference between a value that is saved at deployment time and a reference that is saved and then resolved later.
+Allowing this also encourages an anti-pattern for key vaults by using them for non-secret data (but this is probably not
+something the Deployments team needs to be concerned about).
 
-<sup>(2)</sup> Disallowed because of the save vs re-fetch workflow difference between "auth" and non-"auth". There 
-should be a way to differentiate these behaviors by the Bicep/ARM template author. See <sup>(1)</sup>. Alternatively
-this can be enabled to allow sourcing non-secret data and if secret data is used, it is user error.
+<sup>(2)</sup> It is the user's responsibility to ensure secure data is not provided here.
 
 The reasoning behind the disallowed expressions for stack deployments is because the extension configuration properties
 will be evaluated by the deployment engine and the evaluation results will be returned in the deployment GET response.
 The stacks service will persist this data long-term and use it for the next stack update or deletion that requires
-extension resource deletions. These constraints will make it required that auth properties ("kubeConfig" in the
-Kubernetes example) are provided in way where a directive to re-fetch can be computed and saved. It also prohibits 
-usage of Bicep functions such as `loadFileContent` to inline load secret content.
+extension resource deletions. These constraints will make it required that secure properties ("kubeConfig" in the
+Kubernetes example) are provided in way where a directive to re-fetch can be computed and saved.
 
 The stacks service already sends a stack resource ID HTTP request header to the deployments service. This will be used
 to enable additional validation in the Deployment engine to enforce these expression rules. It will also enable the
