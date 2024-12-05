@@ -179,6 +179,12 @@ Legend:
 Bicep may provide function expressions to use in place of object literal secure property references that will compile to
 the literal format in the ARM template. One such example is the existing `kv.getSecret(...)` function.
 
+For the "Resource" source, custom properties ("credentialType" in the example) on this object will be determined by the
+extension. In a future REP, there will be a design for how extensions can provide this detail. For the time being it
+will be hard coded in the engine to accept certain properties based on the resource type of the resource supplied. This
+future REP will off load the responsibility of how to get the secret from the user and Deployment engine to the
+extension implementer.
+
 **For stack deployments, any language expressions present in extension configurations must be constrained to prevent
 persisting user secrets long-term and causing security risks. There are no restrictions for non-stack deployments.**
 Secure properties will be re-fetched on demand for stack deployments. Non-secure property expressions will be resolved
@@ -558,6 +564,7 @@ will not be provided for non-stack deployments because there are no restricted e
       "alias": "k8s",
       "version": "1.0.0",
       "deploymentId": "/subscriptions/.../resourceGroups/.../providers/Microsoft.Resources/deployments/...",
+      "configId": "<GUID>",
       "config": {
         // the language expressions provided to the PUT have been evaluated
         "namespace": {
@@ -590,27 +597,26 @@ key to the data in the extensions array.
 #### Stacks service considerations
 
 In order for stacks to properly trace resources between 2 separate stack PUTs, the key for a resource's extension
-details becomes the deployment ID, extension alias, extension name, and extension version. The extension alias can be
-changed between 2 separate deployment runs including the edge case where 2 extension's aliases are swapped, so stacks
-must record the extension name and version.
+details becomes the deployment ID, extension alias, extension name, extension version, and configuration ID. The
+extension alias can be changed between 2 separate deployment runs including the edge case where 2 extension's aliases
+are swapped, so stacks must record extension name, version.
 
-There is scenario where a user can reuse the same deployment module with the same name but supply different
-extension configurations. The resources will be distinguished by their identifiers, but deployment extensions will only
-be distinguished by their configuration. This makes it possible that a resource's extension key can resolve to 1-to-many
-configurations. Ideally, deployments would throw during deployment time if there is a nested deployment ID conflict. It
-currently does not and just overwrites the previous deployment, provided there's no concurrent deployment conflict that
-would result in a 409 CONFLICT. This would be a breaking change and is not detectable during preflight due to deployment 
-names being non-deterministic. Without this error being raised, there are 2 possible outcomes for stack extensible resource
-deletions that fall under this scenario:
+There is scenario where a user can reuse the same deployment module with the same name but supply different extension
+configurations. The resources will be distinguished by their identifiers, but deployment extensions will only be
+distinguished by their configuration. This makes it possible that a resource's deployment service extension key can
+resolve to 1-to-many configurations. Deployments currently allows multiple nested deployments with the same ID so long
+as they are not ran concurrently. Without an conflict error being raised, there are 2 possible outcomes for stack
+extensible resource deletions that fall under this scenario:
 
 1. The extension resource deletion fails and is not resolvable without manually deleting the resource.
-1. Using the wrong configuration for a resource can result in unintended side effects in the user's extension environment.
-  This is
+1. Using the wrong configuration for a resource can result in unintended side effects in the user's extension
+   environment. 
 
 There are a couple of way for stacks to mitigate this problem without changes to the deployment service's behavior:
+
 1. Throw an error during deletion and do not delete resources where there is ambiguous configuration.
-1. Store a hash of the configuration on the resource reference or assign configurations a randomly generated ID and assign
-  the resource reference a configuration ID.
+1. Store a configuration ID provided by the deployment service for each extension and extensible resource to link it to
+   the correct configuration.
 
 ### Reference evaluation failures
 
@@ -628,11 +634,12 @@ user from recovering.
 
 ### Pure language expression extension configurations
 
-Design iterations and prototypes of the approach where extension configurations are represented entirely as language 
+Design iterations and prototypes of the approach where extension configurations are represented entirely as language
 expressions proved to be challenging to validate and maintain. The validation logic depended on knowing which property
-in the extension configuration was being processed. It offered a lot of flexibility but with it the complexity of analysis
-and  question if the flexibility was justified. There are currently only a few extensions, many with no configuration
-or very little configuration needed, so it was decided to pivot to the secure property reference object approach.
+in the extension configuration was being processed. It offered a lot of flexibility but with it the complexity of
+analysis and the question if the flexibility was justified. There are currently only a few extensions, many with no
+configuration or very little configuration needed, so it was decided to pivot to the secure property reference object
+approach.
 
 ### Resource deployment parameters
 
