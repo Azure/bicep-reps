@@ -113,21 +113,31 @@ module extResources 'extResources.bicep' = {
   name: 'extResourcesDeploymentName'
   extensionConfigs: {
     k8s: {
-      // a kubeConfig sourced from an ARM resource (AKS cluster):
-      kubeConfig: {
-        source: 'ResourceSecret'
-        resource: aksCluster
-        credentialType: 'Admin' // or user
-      }
-      // a kubeConfig sourced from a user expression (NOT allowed for stack deployments):
-      kubeConfig: { //
-        source: 'Custom'
-        value: aksCluster.listClusterAdminCredential().kubeconfigs[0].value 
-      } 
-      // a kubeConfig sourced from a Key Vault. Note: this will be compiled to the reference object format (source = 'KeyVault')
-      kubeConfig: kv.getSecret('myKubeConfig') // alternatively: { source: 'KeyVault' value: kv.getSecret(...) }
-      // namespace sourced from a deployment parameter
-      namespace: namespace
+      namespace: namespace  // sourced from a deployment parameter
+      
+      // BEGIN clusterType = 'Managed'
+      
+      clusterType: 'Managed'
+      managedClusterId: aksCluster.id
+      credentialType: 'Admin'  // 'Admin' | 'User'
+      
+      // END clusterType = 'Managed
+      
+      // BEGIN clusterType = 'Custom' w/ key vault
+      
+      clusterType: 'Custom'
+      kubeConfig: kv.getSecret(...)  // Only allowable expression type for secure properties for stack deployments. Other ARM resource sourced credentials must be supported by the extension via config properties.
+      
+      // END clusterType = 'Custom' w/ key vault
+      
+      // BEGIN clusterType = 'Custom' w/ custom expression (NOT allowed for stack deployments)
+      
+      clusterType: 'Custom'
+      kubeConfig: aksCluster.listAdminClusterCredential().kubeconfigs[0].value
+      // OR
+      kubeConfig: someDeploymentParam ? ... : ...
+      
+      // END clusterType = 'Custom' w/ custom expression (NOT allowed for stack deployments)
     }
   }
   params: {
@@ -161,28 +171,22 @@ the deployment scope(s) for extensible resources are the extension configuration
 The non-secure values of the configuration are supplied with Bicep expressions. Secure parameters cannot be used for their
 value. 
 
-The secure values of the configuration ("kubeConfig" in the example) are represented as references to the source of the
-value. A reference must be an object literal with a source and required properties for that source. For the first 
-implementation, there will be 3 possible sources:
+The secure values of the configuration ("kubeConfig" in the example) can be supplied with custom Bicep expressions
+for non-stack deployments. For stack deployments, the only allowable expression type is a key vault reference. Secure 
+property values can be resolved from ARM resources for stack deployments but the extension must support this declaratively
+with its extension properties. The extension can supply the deployment engine detail on how to resolve the value based
+on the config values or the deployment engine can hardcode this for specific use cases. A future REP will cover how 
+extensions will provide instructions to fetch from an ARM resource.
 
 Legend:
 - ✅: Allowed
 - ❌: Not allowed (error)
 
-| Source   | Description                                                                     | Stack deployments |
-|----------|---------------------------------------------------------------------------------|-------------------|
-| KeyVault | The secret is retrieved from an Azure Key Vault.                                | ✅                 |
-| Resource | The secret is retrieved from an Azure resource through its REST API.            | ✅                 |
-| Custom   | The secret value is sourced directly from the custom Bicep expression provided. | ❌                 |
-
-Bicep may provide function expressions to use in place of object literal secure property references that will compile to
-the literal format in the ARM template. One such example is the existing `kv.getSecret(...)` function.
-
-For the "Resource" source, custom properties ("credentialType" in the example) on this object will be determined by the
-extension. In a future REP, there will be a design for how extensions can provide this detail. For the time being it
-will be hard coded in the engine to accept certain properties based on the resource type of the resource supplied. This
-future REP will off load the responsibility of how to get the secret from the user and Deployment engine to the
-extension implementer.
+| Source    | Description                                                                                          | Stack deployments                             |
+|-----------|------------------------------------------------------------------------------------------------------|-----------------------------------------------|
+| Key Vault | The secret is retrieved from an Azure Key Vault via `kv.getSecret(...)`                              | ✅                                             |
+| Extension | The secret is retrieved from an Azure resource through its REST API or through some external source. | ✅ the extension must support it declaratively |
+| Custom    | The secret value is sourced directly from the custom Bicep expression provided.                      | ❌                                             |
 
 **For stack deployments, any language expressions present in extension configurations must be constrained to prevent
 persisting user secrets long-term and causing security risks. There are no restrictions for non-stack deployments.**
@@ -191,7 +195,6 @@ at deployment time and the value of the expression will be persisted long-term f
 
 For stack deployments, Bicep expressions prohibited anywhere inside extension configurations:
 - Secure deployment parameters
-- `keyVault.getSecret(...)`  (this expresses a key vault reference rather than a value)
 
 For stack deployments, additional prohibited expressions for non-secure properties:
 - Value access to inherited extension config secure properties
@@ -257,7 +260,6 @@ module foo 'foo.bicep' = {
   }
 }
 
-
 // ✅ piecemeal inheritance
 module baz 'foo.bicep' = {
   extensionConfigs: {
@@ -279,7 +281,7 @@ module bar 'foo.bicep' = {
 }
 
 // ❌ secure properties cannot be used as values to non-secure properties
-module baz 'foo.bicep' = {
+module fooy 'foo.bicep' = {
   extensionConfigs: {
     kubernetes: { 
       kubeConfig: kubernetes.kubeConfig // ok
@@ -318,19 +320,30 @@ param boolParam = true
 extensionConfigs {
   k8s: {
     namespace: 'default'
-    kubeConfig: getSecret(...)
+    
+    // BEGIN clusterType = 'Managed'
+    
+    clusterType: 'Managed'
+    managedClusterId: '/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/...'
+    credentialType: 'Admin' // 'Admin' | 'User'
+    
+    // END clusterType = 'Managed'
+    
+    // BEGIN clusterType = 'Custom'
+    
+    clusterType: 'Custom'
+    kubeConfig: getSecret(...) // This is the ONLY supported expression type for secure properties for stack deployments. Resource sourced credentials that the extension helps point to must be supported by the extension via a config discriminator such as 'clusterType' in this example.
+   
+    // END clusterType = 'Custom'
+    
+    // BEGIN clusterType = 'Custom' & non-stack deployment
+    
+    clusterType: 'Custom'
+    kubeConfig: loadFileContent(...)
     // OR
-    kubeConfig: az.aksClusterCredentials(...) // New function, overloads pending the resource/extension capabilities.
-    // OR
-    kubeConfig: { // NOT allowed for stack deployments
-      source: 'Custom'
-      value: loadFileContent('...')
-    }
-    // OR
-    kubeConfig: { // NOT allowed for stack deployments
-      source: 'Custom'
-      value: 'inlined'
-    }
+    kubeConfig: 'inlined'
+    
+    // END clusterType = 'Custom' & non-stack deployment
   }
 }
 ```
@@ -363,20 +376,25 @@ main.parameters.json
       "namespace": {
         "value": "default"
       },
-      "kubeConfig": {
-        "source": "KeyVault",
-        "resource": "/subscriptions/.../resourceGroups/.../Microsoft.KeyVault/vaults/...",
-        "secretName": "myKubeConfig"
+      "clusterType": {
+        "value": "Managed", // "Managed" | "Custom"
       },
-      // OR
+      "managedClusterId": {
+        "value": "/...", // ARM resource id
+      },
+      "credentialType": {
+        "value": "Admin", // "Admin" | "User"
+      },
       "kubeConfig": {
-        "source": "Resource",
-        "resource": "/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/...",
-        "credentialType": "Admin"
+        "keyVaultReference": {
+          "keyVault": {
+            "id": "/subscriptions/.../resourceGroups/.../Microsoft.KeyVault/vaults/.."
+          },
+          "secretName": "myKubeConfig"
+        }
       },
       // OR
       "kubeConfig": { // NOT allowed for stack deployments
-        "source": "Custom",
         "value": "Some literal value"
       }
     }
@@ -387,9 +405,10 @@ main.parameters.json
 The above format defines the signature of the `"extensionConfigs"` object accepted by the deployment PUT API. The
 `"extensionConfigs"` object is a mapping of extension aliases (as defined in the deployment template) to extension
 configurations. Each extension configuration is an object. The properties of the object are defined by the extension
-schema. For example, the Kubernetes extension defines `kubeConfig` and `namespace`. Non-secure properties values are
-provided as an object with a `"value"` property for the actual value. Secure properties are provided in the reference
-object format described in the Bicep design section.
+schema. For example, the Kubernetes extension defines `clusterType`, `kubeConfig`, and `namespace`. Extensions can
+define their own config object discriminators for different ways of resolving config data or instructing the deployments
+engine on how to fetch the data. Non-secure properties values are provided as an object with a `"value"` property for
+the actual value. Secure properties are provided in the reference object format described in the Bicep design section.
 
 #### Nested deployment extension configurations
 
@@ -419,10 +438,27 @@ main.json - The root deployment
               "namespace": {
                 "value": "[parameters('namespace')]"
               },
+              "clusterType": {
+                "value": "Managed",
+              },
+              "managedClusterId": {
+                "value": "[resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01')]",
+              },
+              "credentialType": {
+                "value": "Admin",
+              },
+              // key vault example
               "kubeConfig": {
-                "source": "Resource",
-                "resource": "[resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01')]",
-                "credentialType": "Admin"
+                "keyVaultReference": {
+                  "keyVault": {
+                    "id": "[...]"
+                  },
+                  "secretName": "[...]"
+                }
+              },
+              // custom example (NOT allowed for stack deployments)
+              "kubeConfig": {
+                "value": "[...]"
               }
             }
           },
@@ -477,10 +513,23 @@ Here is an example:
               "namespace": {
                 "value": "[parameters('namespace')]"
               },
+              "clusterType": {
+                "value": "Managed",
+              },
+              "managedClusterId": {
+                "value": "[resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01')]",
+              },
+              "credentialType": {
+                "value": "Admin",
+              },
+              // key vault example
               "kubeConfig": {
-                "source": "Resource",
-                "resource": "[resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01')]",
-                "credentialType": "Admin"
+                "keyVaultReference": {
+                  "keyVault": {
+                    "id": "[...]"
+                  },
+                  "secretName": "[...]"
+                }
               }
             }
           },
@@ -509,16 +558,44 @@ Here is an example:
                 "properties": {
                   "extensionConfigs": {
                     // whole inheritance:
-                    "kubernetes": "[extensionConfigs('k8s')]", // extension name + version must match
+                    "kubernetes": "[extensionConfigs('k8s')]", // ✅ extension name + version must match, language expression must resolve to a extensionConfig() call with no property access. Simpler limited alternative: just a string of the extension alias.
+                    //  OR:
+                    "kubernetes": "[createObject(...)]", // ❌ not an extension config value
                     // piece-meal inheritance:
                     "kubernetes": {
-                      "namespace": "[extensionConfigs('k8s').namespace]", // accessing kubeConfig for namespace is NOT allowed for stack deployments
-                      "kubeConfig": "[extensionConfigs('k8s').kubeConfig]"
+                      "namespace": {
+                        "value": "[extensionConfigs('k8s').namespace]", // ✅
+                        // Not allowed:
+                        "value": "[extensionConfigs('k8s').kubeConfig]" // ❌
+                      }, 
+                      "kubeConfig": {
+                        "value": "[extensionConfigs('k8s').kubeConfig]" // ✅
+                      },
                     },
                     // partial inheritance:
                     "kubernetes": {
-                      "namespace": "myOtherNamespace",
-                      "kubeConfig": "[extensionConfigs('k8s').kubeConfig]"
+                      "namespace": {
+                        "value": "myOtherNamespace",
+                      },
+                      "kubeConfig": {
+                        "value": "[extensionConfigs('k8s').kubeConfig]", // ✅ inherit a KV reference for stack deployment. For stack deployments, the language expression must resolve from an extension config secure property, otherwise it's invalid
+                        // OR:
+                        "value": "[listClusterAdminCredential(...).kubeconfigs[0].value]" // ❌ NOT allowed for stack deployments
+                      },
+                    },
+                    //  OR:
+                    "kubernetes": {
+                      "namespace": {
+                        "value": "[extensionConfigs('k8s').namespace]", // ✅
+                      },
+                      "kubeConfig": {
+                        "keyVaultReference": { // ✅ different key vault reference
+                          "keyVault": {
+                            "id": "[...]"
+                          },
+                          "secretName": "[parameters('myOtherSecretName')]"
+                        }
+                      },
                     }
                   },
                   "template": {
