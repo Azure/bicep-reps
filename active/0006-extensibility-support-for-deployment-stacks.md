@@ -394,7 +394,7 @@ main.parameters.json
         }
       },
       // OR
-      "kubeConfig": { // NOT allowed for stack deployments
+      "kubeConfig": { // ❌ NOT allowed for stack deployments, ✅ non-stack deployment
         "value": "Some literal value"
       }
     }
@@ -408,7 +408,7 @@ configurations. Each extension configuration is an object. The properties of the
 schema. For example, the Kubernetes extension defines `clusterType`, `kubeConfig`, and `namespace`. Extensions can
 define their own config object discriminators for different ways of resolving config data or instructing the deployments
 engine on how to fetch the data. Non-secure properties values are provided as an object with a `"value"` property for
-the actual value. Secure properties are provided in the reference object format described in the Bicep design section.
+the actual value. Secure properties are provided either as an object with either a value or key vault reference.
 
 #### Nested deployment extension configurations
 
@@ -627,8 +627,8 @@ deployment parameters.
 
 To support stacks extensibility, the deployments API needs to return additional data about extensible resources.
 It needs to return extensions with their configurations and the resources deployed to those extensions. Extensible resources
-need to be linked to extensions. This can be done with the key: extension name, extension version, config instructions hash,
-and config hash.
+need to be linked to extensions. This can be done with the key: extension name, extension version, and config hash. It
+is possible the key may match to multiple extensions with differing config instructions, but this is an edge case.
 
 Deployment GET:
 ```json5
@@ -638,7 +638,7 @@ Deployment GET:
     {
       "name": "Kubernetes",
       "version": "1.0.0",
-      "configInstructionsHash": "<HASH>", // Hashed by deployments, avoids duping records in outputResources.
+      "configInstructionsHash": "<HASH>", // Hashed by deployments, distinguishes edge cases of the same extension and resolved config but differing instructions (key vault secret "A" and "B", but both secrets are the same)
       "configHash": "<HASH>", // Provided by the extension in the CREATE/UPDATE return payload.
       "config": {
         // the language expressions provided to the PUT have been evaluated
@@ -665,9 +665,7 @@ Deployment GET:
     { // NEW: Extensible resource
       "extensionName": "Kubernetes",
       "extensionVersion": "1.0.0",
-      "extensionConfigInstructionsHash": "<HASH>",
       "extensionConfigHash": "<HASH>",
-      "symbolicName": "myService",
       "extensibleResourceType": "core/Service",
       "apiVersion": "v1",
       "identifiers": {
@@ -707,9 +705,27 @@ Operation GET for extensible resource:
 +     "extension": {
 +       "name": "Kubernetes",
 +       "version": "1.27.8",
-+       "configInstructionsHash": "<HASH>",
 +       "configHash": "<HASH>"
 +     }
+    }
+  }
+}
+```
+
+Operation GET for ARM resource:
+
+```diff
+{
+  ...
+  "type": "Microsoft.Resources/deployments",
+  "properties": {
+    ...
+    "provisioningOperation": "Create",
+    "provisioningState": "Succeeded",
+    "targetResource": {
+      "id": "/subscriptions/...",
++     "resourceType": "Microsoft.ContainerService/cluster",
++     "apiVersion": "2024-04-01"
     }
   }
 }
@@ -722,15 +738,16 @@ process each logical extension resource and track them between 2 stack deploymen
 #### Stacks service considerations
 
 In order for stacks to properly trace resources between 2 separate stack PUTs, the key for a resource's extension
-details becomes the extension name, extension version, configuration instructions hash, and configuration hash. The
-extension alias and deployment ID cannot be used in identifying resources or extensions. Non-concurrent deployments with
-colliding IDs and aliases can point to different extensions. Additionally, these 2 fields can be changed by the user or
-are generated between deployment stack PUTs. For each extensible resource, stacks will persist the extension name,
-extension version, configuration instructions hash, configuration hash. The configuration instructions are hashed for
-the edge case that the same resource is deployed more than once in a single deployment PUT with different config
-instructions but the same config value. Stacks will need to be aware of this or at very least record when this happens
-for visibility. Stacks could try to delete the same resource with each different instruction and dedupe deletion
-requests based on resolved config value.
+details becomes the extension name, extension version, and configuration hash. The extension alias and deployment ID
+cannot be used in identifying resources or extensions. Non-concurrent deployments with colliding IDs and aliases can
+point to different extensions. Additionally, these 2 fields can be changed by the user or are generated between
+deployment stack PUTs. For each extensible resource, stacks will persist the extension name, extension version,
+configuration hash. 
+
+The configuration instructions are hashed in the persisted extension for the edge case that the same resource is
+deployed more than once in a single deployment PUT with different config instructions but the same config value. Stacks
+will need to be aware of this or at very least record when this happens for visibility. Stacks could try to resolve each
+config instruction and throw if there's a mismatch in the resolved configs.
 
 The extension, if it accepts a configuration, will be required to provide back a configuration hash. It is the
 responsibility of the extension to secure this hash. The extension should return the same hash for the same
