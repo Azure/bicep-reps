@@ -3,7 +3,6 @@ REP Number: 0006
 Author: kalbert312 (Kyle Albert)
 Start Date: 2024-08-27
 Feature Status: Public Preview
-Enhances: 0008
 ---
 
 # Integrating extensible resources with deployment stacks
@@ -549,22 +548,21 @@ deployment parameters.
 
 ### Microsoft.Resources/deployments API changes
 
-This REP extends upon the API changes in REP 0008 by adding a configuration value to the extensions returned from a
-deployment GET. This configuration object will be similar to the configuration object described in the above ARM
-template design changes but with template language expressions evaluated and compiled to a format that can be relatively
-easily interpreted. The disallowed expression types will prevent sensitive data from showing up here. The configuration
-will not be provided for non-stack deployments because there are no restricted expressions.
+To support stacks extensibility, the deployments API needs to return additional data about extensible resources.
+It needs to return extensions with their configurations and the resources deployed to those extensions. Extensible resources
+need to be linked to extensions. This can be done with the key: extension name, extension version, config instructions hash,
+and config hash.
 
+Deployment GET:
 ```json5
 {
   // ... deployment contract
-  "extensions": [
+  "extensions": [ // NEW: "Extensions" must be returned for any deployment terminal state (Succeeded, Failed, etc)
     {
       "name": "Kubernetes",
-      "alias": "k8s",
       "version": "1.0.0",
-      "deploymentId": "/subscriptions/.../resourceGroups/.../providers/Microsoft.Resources/deployments/...",
-      "configId": "<GUID>",
+      "configInstructionsHash": "<HASH>", // Hashed by deployments, avoids duping records in outputResources.
+      "configHash": "<HASH>", // Provided by the extension in the CREATE/UPDATE return payload.
       "config": {
         // the language expressions provided to the PUT have been evaluated
         "namespace": {
@@ -585,38 +583,84 @@ will not be provided for non-stack deployments because there are no restricted e
         }
       }
     }
+  ],
+  "outputResources": [ // "outputResources" is only populated when the deployment is successful. Stacks uses operations to peel through failed deployment resources.
+    { // NEW: Extensible resource
+      "extensionName": "Kubernetes",
+      "extensionVersion": "1.0.0",
+      "extensionConfigInstructionsHash": "<HASH>",
+      "extensionConfigHash": "<HASH>",
+      "symbolicName": "myService",
+      "extensibleResourceType": "core/Service",
+      "apiVersion": "v1",
+      "identifiers": {
+        "metadata": {
+          "namespace": "default",
+          "name": "myService",
+        }
+      }
+    },
+    { // ARM resource
+      "id": "..."
+    }
   ]
 }
 ```
 
-With the deployments service returning a list of all extensions (across all nested deployments) with their configuration s
-and returning all extension resources deployed in the template (across all nested deployments), the stacks
-service can process each extension resource and use the "deploymentId" and "extensionAlias" properties as a composite
-key to the data in the extensions array.
+Operation GET for extensible resource:
+```diff
+{
+  ...
+  "type": "Microsoft.Resources/deployments",
+  "properties": {
+    ...
+    "provisioningOperation": "Create",
+    "provisioningState": "Succeeded",
+    "targetResource": {
+      "resourceType" null, // This field cannot be used because of swagger types expecting an ARM resource type.
++     "extensibleResourceType": "core/Service",
++     "apiVersion": "v1",
++     "symbolicName": "myService",
++     "identifiers": {
++       "metadata": {
++         "namespace": "default",
++         "name": "myService",
++       },
++     },
++     "extension": {
++       "name": "Kubernetes",
++       "version": "1.27.8",
++       "configInstructionsHash": "<HASH>",
++       "configHash": "<HASH>"
++     }
+    }
+  }
+}
+```
+
+With the deployments service returning a list of all extensions (across all nested deployments) with their configuration
+s and returning all extension resources deployed in the template (across all nested deployments), the stacks service can
+process each logical extension resource and track them between 2 stack deployments.
 
 #### Stacks service considerations
 
 In order for stacks to properly trace resources between 2 separate stack PUTs, the key for a resource's extension
-details becomes the deployment ID, extension alias, extension name, extension version, and configuration ID. The
-extension alias can be changed between 2 separate deployment runs including the edge case where 2 extension's aliases
-are swapped, so stacks must record extension name, version.
+details becomes the extension name, extension version, configuration instructions hash, and configuration hash. The
+extension alias and deployment ID cannot be used in identifying resources or extensions. Non-concurrent deployments with
+colliding IDs and aliases can point to different extensions. Additionally, these 2 fields can be changed by the user or
+are generated between deployment stack PUTs. For each extensible resource, stacks will persist the extension name,
+extension version, configuration instructions hash, configuration hash. The configuration instructions are hashed for
+the edge case that the same resource is deployed more than once in a single deployment PUT with different config
+instructions but the same config value. Stacks will need to be aware of this or at very least record when this happens
+for visibility. Stacks could try to delete the same resource with each different instruction and dedupe deletion
+requests based on resolved config value.
 
-There is scenario where a user can reuse the same deployment module with the same name but supply different extension
-configurations. The resources will be distinguished by their identifiers, but deployment extensions will only be
-distinguished by their configuration. This makes it possible that a resource's deployment service extension key can
-resolve to 1-to-many configurations. Deployments currently allows multiple nested deployments with the same ID so long
-as they are not ran concurrently. Without an conflict error being raised, there are 2 possible outcomes for stack
-extensible resource deletions that fall under this scenario:
-
-1. The extension resource deletion fails and is not resolvable without manually deleting the resource.
-1. Using the wrong configuration for a resource can result in unintended side effects in the user's extension
-   environment. 
-
-There are a couple of way for stacks to mitigate this problem without changes to the deployment service's behavior:
-
-1. Throw an error during deletion and do not delete resources where there is ambiguous configuration.
-1. Store a configuration ID provided by the deployment service for each extension and extensible resource to link it to
-   the correct configuration.
+The extension, if it accepts a configuration, will be required to provide back a configuration hash. It is the
+responsibility of the extension to secure this hash. The extension should return the same hash for the same
+configuration passed to it and should not collide with unique configurations. This allows stacks to uniquely identify
+the logical resource without persisting secure data. The extension will accept this hash back when stacks tries to
+delete extensible resources. At the time of deletion, the extension will compare the hash it receives with the hash of
+the configuration passed to it at that time. If the hashes do not match, the extension will error the deletion.
 
 ### Reference evaluation failures
 
