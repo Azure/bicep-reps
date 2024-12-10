@@ -34,7 +34,6 @@ To address this issue, the deployments and deployment operations APIs must be up
 - Bicep extension alias
 - Bicep extension name
 - Bicep extension version
-- Bicep extension configuration ID
 - Resource symbolic name
 - Resource type
 - Resource API version
@@ -69,7 +68,6 @@ The `Microsoft.Resources/deployments` API will be updated to include an `extensi
 +       "alias": "k8s",
 +       "name": "Kubernetes",
 +       "version": "1.27.8",
-+       "configId": "00000000-0000-0000-0000-000000000001", // to disambiguate multiple non-concurrent deployments with the same ID and extension details.
 +       "config": {
 +         // Out of the scope of this REP, but it is required to enable Deployment Stacks integration.  
 +       }
@@ -97,7 +95,6 @@ To improve the current structure where each `outputResources` object only has a 
       {
 +       "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
 +       "extensionAlias": "k8s",
-+       "extensionConfigId": "00000000-0000-0000-0000-000000000001", // populated if the extension has configuration, disambiguates across multiple deployments
 +       "symbolicName": "myService",
 +       "resourceType": "core/Service",
 +       "apiVersion": "v1",
@@ -142,7 +139,6 @@ To align with modifications made to the `Microsoft.Resources/deployments` API, t
 +       "alias": "k8s",
 +       "name": "Kubernetes",
 +       "version": "1.27.8",
-+       "configId": "00000000-0000-0000-0000-000000000001"
 +     }
     }
   }
@@ -209,7 +205,6 @@ supplied by the extension and any additional context needed to prevent possibili
   {
     "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-resource-group/providers/Microsoft.Resources/deployments/my-deployment",
     "extensionAlias": "k8s",
-    "extensionConfigId": "00000000-0000-0000-0000-00000000000",
     "symbolicName": "myService",
     "resourceType": "core/Service",
     "apiVersion": "v1",
