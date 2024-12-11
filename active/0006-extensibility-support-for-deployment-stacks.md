@@ -307,7 +307,7 @@ expressions inside of extension configurations for any deployment:
 
 Because extension configurations will be an input property to the deployment, there needs to be a way for frontends
 to supply this data to a root deployment. The `bicepparam` file type can be expanded to support defining extension
-configurations.
+configurations. Each extension can be configured with a `extension <alias> with { <config object> }` declaration.
 
 Here is an example:
 
@@ -319,8 +319,7 @@ using 'main.bicep'
 param boolParam = true
 // ...
 
-extensionConfigs {
-  k8s: {
+extension k8s with {
     namespace: 'default'
     
     // BEGIN clusterType = 'Managed'
@@ -346,8 +345,9 @@ extensionConfigs {
     kubeConfig: 'inlined'
     
     // END clusterType = 'Custom' & non-stack deployment
-  }
 }
+
+extension otherExt with { ... }
 ```
 
 If extensions require a configuration, there must be a parameters file (Bicep or JSON) that provide the extension
