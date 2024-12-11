@@ -176,7 +176,9 @@ for non-stack deployments. For stack deployments, the only allowable expression 
 property values can be resolved from ARM resources for stack deployments but the extension must support this declaratively
 with its extension properties. The extension can supply the deployment engine detail on how to resolve the value based
 on the config values or the deployment engine can hardcode this for specific use cases. A future REP will cover how 
-extensions will provide instructions to fetch from an ARM resource.
+extensions will provide instructions to fetch from an ARM resource. In short, this will be a pure function on the extension
+based on what the user passed to the config. Allowing state (such as a resource's state or deploying user) to alter the
+directions the extension provides would increase the complexity of the workflow.
 
 Legend:
 - ✅: Allowed
@@ -638,7 +640,6 @@ Deployment GET:
     {
       "name": "Kubernetes",
       "version": "1.0.0",
-      "configInstructionsHash": "<HASH>", // Hashed by deployments, distinguishes edge cases of the same extension and resolved config but differing instructions (key vault secret "A" and "B", but both secrets are the same)
       "configHash": "<HASH>", // Provided by the extension in the CREATE/UPDATE return payload.
       "config": {
         // the language expressions provided to the PUT have been evaluated
@@ -703,6 +704,7 @@ Operation GET for extensible resource:
 +       },
 +     },
 +     "extension": {
++       "alias": "k8s",
 +       "name": "Kubernetes",
 +       "version": "1.27.8",
 +       "configHash": "<HASH>"
@@ -737,17 +739,27 @@ process each logical extension resource and track them between 2 stack deploymen
 
 #### Stacks service considerations
 
-In order for stacks to properly trace resources between 2 separate stack PUTs, the key for a resource's extension
-details becomes the extension name, extension version, and configuration hash. The extension alias and deployment ID
-cannot be used in identifying resources or extensions. Non-concurrent deployments with colliding IDs and aliases can
-point to different extensions. Additionally, these 2 fields can be changed by the user or are generated between
-deployment stack PUTs. For each extensible resource, stacks will persist the extension name, extension version,
-configuration hash. 
+Stacks will track a logical resource by its extension name, extension version, and config hash. The extension alias and
+deployment ID cannot be used in identifying resources or extensions. Non-concurrent deployments with colliding IDs and
+aliases can point to different extensions. The same resource can also be deployed in deployments with differing IDs.
+Additionally, these 2 fields can be changed by the user or are generated between deployment stack PUTs. For each 
+extensible resource, stacks will persist the extension name, extension version, configuration hash.
 
-The configuration instructions are hashed in the persisted extension for the edge case that the same resource is
-deployed more than once in a single deployment PUT with different config instructions but the same config value. Stacks
-will need to be aware of this or at very least record when this happens for visibility. Stacks could try to resolve each
-config instruction and throw if there's a mismatch in the resolved configs.
+The extension, if it accepts a configuration, will be required to provide back a configuration hash. It is the
+responsibility of the extension to secure this hash. The extension should return the same hash for the same
+configuration passed to it and should not collide with unique configurations. This allows stacks to uniquely identify
+the logical resource without persisting secure data. The extension will accept this hash back when stacks tries to
+delete extensible resources. At the time of deletion, the extension will compare the hash it receives with the hash of
+the configuration passed to it at that time. If the hashes do not match, the extension will error the deletion.
+
+Stacks will also persist the extensions returned by the deployment GET. Each extensible resource should map back to 1
+extension for the most part, but there are edge cases where it can map back to multiple extensions. For example, the
+user might declare 2 Kubernetes extensions in their templates, each with a different key vault reference. It's possible
+that the 2 different secrets could resolve to the same secret, leading to matching config hashes but differing
+instructions. Stacks can resolve this by resolving each configuration. If both configurations match, the request to delete
+can be deduped and be queued. If extension configurations mismatch, stacks can throw an error to the user and require them
+to manually intervene. Stacks can also try to delete with both configurations. The hash check match implemented in 
+extensions should cause all but 1 of the requests to fail.
 
 The extension, if it accepts a configuration, will be required to provide back a configuration hash. It is the
 responsibility of the extension to secure this hash. The extension should return the same hash for the same
