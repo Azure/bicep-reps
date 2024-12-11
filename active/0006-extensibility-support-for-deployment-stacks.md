@@ -320,31 +320,31 @@ param boolParam = true
 // ...
 
 extension k8s with {
-    namespace: 'default'
-    
-    // BEGIN clusterType = 'Managed'
-    
-    clusterType: 'Managed'
-    managedClusterId: '/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/...'
-    credentialType: 'Admin' // 'Admin' | 'User'
-    
-    // END clusterType = 'Managed'
-    
-    // BEGIN clusterType = 'Custom'
-    
-    clusterType: 'Custom'
-    kubeConfig: getSecret(...) // This is the ONLY supported expression type for secure properties for stack deployments. Resource sourced credentials that the extension helps point to must be supported by the extension via a config discriminator such as 'clusterType' in this example.
-   
-    // END clusterType = 'Custom'
-    
-    // BEGIN clusterType = 'Custom' & non-stack deployment
-    
-    clusterType: 'Custom'
-    kubeConfig: loadFileContent(...)
-    // OR
-    kubeConfig: 'inlined'
-    
-    // END clusterType = 'Custom' & non-stack deployment
+  namespace: 'default'
+  
+  // BEGIN clusterType = 'Managed'
+  
+  clusterType: 'Managed'
+  managedClusterId: '/subscriptions/.../resourceGroups/.../Microsoft.ContainerService/managedClusters/...'
+  credentialType: 'Admin' // 'Admin' | 'User'
+  
+  // END clusterType = 'Managed'
+  
+  // BEGIN clusterType = 'Custom'
+  
+  clusterType: 'Custom'
+  kubeConfig: getSecret(...) // This is the ONLY supported expression type for secure properties for stack deployments. Resource sourced credentials that the extension helps point to must be supported by the extension via a config discriminator such as 'clusterType' in this example.
+  
+  // END clusterType = 'Custom'
+  
+  // BEGIN clusterType = 'Custom' & non-stack deployment
+  
+  clusterType: 'Custom'
+  kubeConfig: loadFileContent(...)
+  // OR
+  kubeConfig: 'inlined'
+  
+  // END clusterType = 'Custom' & non-stack deployment
 }
 
 extension otherExt with { ... }
