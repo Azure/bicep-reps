@@ -415,8 +415,10 @@ the actual value. Secure properties are provided either as an object with either
 #### Nested deployment extension configurations
 
 The format of the `"extensionConfigs"` deployment property is different for nested deployments because they are part of
-a deployment template. The structure is the same except extension configurations object property values can be language
-expressions.
+a deployment template. The structure is similar to the parameters file format except that non-key vault based values are
+provided either literally or as a language expression directly to the property. This format will be transformed on the
+backend to match the PUT format. The reason this is necessary is support language expressions that can resolve to key
+vault references.
 
 Below is an example ARM template followed by specifications for each property. Only REP relevant data is shown.
 
@@ -437,18 +439,10 @@ main.json - The root deployment
             // Expressions are not allowed to reference secure parameters.
             // This will be evaluated out to the deployment PUT format during preprocessing and deployment
             "k8s": {
-              "namespace": {
-                "value": "[parameters('namespace')]"
-              },
-              "clusterType": {
-                "value": "Managed",
-              },
-              "managedClusterId": {
-                "value": "[resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01')]",
-              },
-              "credentialType": {
-                "value": "Admin",
-              },
+              "namespace": "[parameters('namespace')]",
+              "clusterType": "Managed",
+              "managedClusterId": "[resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01')]",
+              "credentialType": "Admin",
               // key vault example
               "kubeConfig": {
                 "keyVaultReference": {
@@ -458,10 +452,8 @@ main.json - The root deployment
                   "secretName": "[...]"
                 }
               },
-              // custom example (NOT allowed for stack deployments)
-              "kubeConfig": {
-                "value": "[...]"
-              }
+              // custom example for secure property (NOT allowed for stack deployments)
+              "kubeConfig": "[...]"
             }
           },
           "template": {
@@ -512,18 +504,10 @@ Here is an example:
           "extensionConfigs": {
             // what we will inherit
             "k8s": {
-              "namespace": {
-                "value": "[parameters('namespace')]"
-              },
-              "clusterType": {
-                "value": "Managed",
-              },
-              "managedClusterId": {
-                "value": "[resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01')]",
-              },
-              "credentialType": {
-                "value": "Admin",
-              },
+              "namespace": "[parameters('namespace')]",
+              "clusterType": "Managed",
+              "managedClusterId": "[resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01')]",
+              "credentialType": "Admin",
               // key vault example
               "kubeConfig": {
                 "keyVaultReference": {
@@ -565,31 +549,19 @@ Here is an example:
                     "kubernetes": "[createObject(...)]", // ❌ not an extension config value
                     // piece-meal inheritance:
                     "kubernetes": {
-                      "namespace": {
-                        "value": "[extensionConfigs('k8s').namespace]", // ✅
-                        // Not allowed:
-                        "value": "[extensionConfigs('k8s').kubeConfig]" // ❌
-                      }, 
-                      "kubeConfig": {
-                        "value": "[extensionConfigs('k8s').kubeConfig]" // ✅
-                      },
+                      "namespace": "[extensionConfigs('k8s').namespace]", // ✅ ( ❌ [extensionConfigs('k8s').kubeConfig] )
+                      "kubeConfig": "[extensionConfigs('k8s').kubeConfig]" // ✅
                     },
                     // partial inheritance:
                     "kubernetes": {
-                      "namespace": {
-                        "value": "myOtherNamespace",
-                      },
-                      "kubeConfig": {
-                        "value": "[extensionConfigs('k8s').kubeConfig]", // ✅ inherit a KV reference for stack deployment. For stack deployments, the language expression must resolve from an extension config secure property, otherwise it's invalid
-                        // OR:
-                        "value": "[listClusterAdminCredential(...).kubeconfigs[0].value]" // ❌ NOT allowed for stack deployments
-                      },
+                      "namespace": "myOtherNamespace",
+                      "kubeConfig": "[extensionConfigs('k8s').kubeConfig]", // ✅ inherit a KV reference for stack deployment. For stack deployments, the language expression must resolve from an extension config secure property, otherwise it's invalid
+                       // OR:
+                      "kubeConfig": "[listClusterAdminCredential(...).kubeconfigs[0].value]" // ❌ NOT allowed for stack deployments
                     },
                     //  OR:
                     "kubernetes": {
-                      "namespace": {
-                        "value": "[extensionConfigs('k8s').namespace]", // ✅
-                      },
+                      "namespace": "[extensionConfigs('k8s').namespace]", // ✅
                       "kubeConfig": {
                         "keyVaultReference": { // ✅ different key vault reference
                           "keyVault": {
@@ -624,6 +596,31 @@ enables substitution to occur.
 
 The language expression rules listed in the Bicep design discussion apply here as well, such as prohibition of secure
 deployment parameters.
+
+The `extensionConfigs()` function will return the deployment engine's representation of the configuration. That means
+for each top-level property, an object wrapper is returned rather than the actual value of that property. This wrapper
+object has the following properties:
+
+- `value`: The resolved value of the extension config property.
+- `keyVaultReference`: The key vault reference used to resolve the extension config property if one was used, otherwise null.
+
+For example, to output the values of extension configurations using deployment outputs:
+
+```json5
+{
+  "outputs": {
+    "kubeConfigUsed": {
+      "type": "securestring",
+      "value": "[extensionConfigs('k8s').kubeConfig.value]"
+    },
+    "kubeConfigKeyVaultReference": {
+      "type": "object",
+      "value": "[extensionConfigs('k8s').kubeConfig.keyVaultReference]"
+    }
+  }
+}
+
+```
 
 ### Microsoft.Resources/deployments API changes
 
