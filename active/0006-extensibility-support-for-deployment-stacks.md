@@ -625,6 +625,40 @@ This object wrapper will be automatically created in Bicep's codegen as needed t
 extension config format. When manually authoring an ARM template, the author must match the expected format as shown in
 the above examples.
 
+Here are some examples of Bicep to ARM template translations:
+
+Bicep:
+```bicep
+extensionConfigs: {
+  k8s: {
+    str: strParam
+    obj: objParam
+    secureStr: secureStrParam
+    secureStrExt: k8s.kubeConfig
+    secureObjExt: k8s.kubeObject
+    ifBothExt: boolParam ? k8s.kubeConfig : k8s2.kubeConfig
+    ifMixed: boolParam ? k8s.kubeConfig : strParam
+  }
+}
+```
+
+ARM template:
+```json5
+{
+  "extensionConfigs": {
+    "k8s": {
+      "str": "[createObject('value', parameters('strParam'))]",
+      "obj": "[createObject('value', parameters('objParam'))]",
+      "secureStr": "[createObject('value, parameters('secureStrParam'))]",
+      "secureStrExt": "[extensionConfigs('k8s').kubeConfig]",
+      "secureObjExt": "[extensionConfigs('k8s').kubeObject]",
+      "ifBothExt": "[if(parameters('boolParam'), extensionConfigs('k8s').kubeConfig, extensionConfigs('k8s2').kubeConfig)]",
+      "ifMixed": "[if(parameters('boolParam'), extensionConfigs('k8s').kubeConfig, createObject('value', parameters('strParam')))]"
+    }
+  }
+}
+```
+
 ### Microsoft.Resources/deployments API changes
 
 To support stacks extensibility, the deployments API needs to return additional data about extensible resources.
