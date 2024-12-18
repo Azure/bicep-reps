@@ -544,9 +544,9 @@ Here is an example:
                 "properties": {
                   "extensionConfigs": {
                     // whole inheritance:
-                    "kubernetes": "[extensionConfigs('k8s')]", // ✅ extension name + version must match, language expression must resolve to a extensionConfig() call with no property access. Simpler limited alternative: just a string of the extension alias.
+                    "kubernetes": "k8s", // ✅ extension name + version must match.
                     //  OR:
-                    "kubernetes": "[createObject(...)]", // ❌ not an extension config value
+                    "kubernetes": "[createObject(...)]", // ❌ language expression not allowed here for stacks deployments because property analysis is complex.
                     // piece-meal inheritance:
                     "kubernetes": {
                       "namespace": "[extensionConfigs('k8s').namespace]", // ✅ ( ❌ [extensionConfigs('k8s').kubeConfig] )
@@ -554,10 +554,10 @@ Here is an example:
                     },
                     // partial inheritance:
                     "kubernetes": {
-                      "namespace": "myOtherNamespace",
+                      "namespace": "[createObject('value', 'myOtherNamespace')]",
                       "kubeConfig": "[extensionConfigs('k8s').kubeConfig]", // ✅ inherit a KV reference for stack deployment. For stack deployments, the language expression must resolve from an extension config secure property, otherwise it's invalid
                        // OR:
-                      "kubeConfig": "[listClusterAdminCredential(...).kubeconfigs[0].value]" // ❌ NOT allowed for stack deployments
+                      "kubeConfig": "[createObject('value', listClusterAdminCredential(...).kubeconfigs[0].value)]" // ❌ NOT allowed for stack deployments
                     },
                     //  OR:
                     "kubernetes": {
@@ -619,8 +619,11 @@ For example, to output the values of extension configurations using deployment o
     }
   }
 }
-
 ```
+
+This object wrapper will be automatically created in Bicep's codegen as needed to match the expected nested deployment
+extension config format. When manually authoring an ARM template, the author must match the expected format as shown in
+the above examples.
 
 ### Microsoft.Resources/deployments API changes
 
