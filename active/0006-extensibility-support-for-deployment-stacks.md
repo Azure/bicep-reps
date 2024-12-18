@@ -546,7 +546,7 @@ Here is an example:
                     // whole inheritance:
                     "kubernetes": "k8s", // ✅ extension name + version must match.
                     //  OR:
-                    "kubernetes": "[createObject(...)]", // ❌ language expression not allowed here for stacks deployments because property analysis is complex.
+                    "kubernetes": "[createObject(...)]", // ❌ language expression not allowed here.
                     // piece-meal inheritance:
                     "kubernetes": {
                       "namespace": "[extensionConfigs('k8s').namespace]", // ✅ ( ❌ [extensionConfigs('k8s').kubeConfig] )
