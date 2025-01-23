@@ -31,7 +31,7 @@ It also pollutes the resource property namespace, which hasn't been a problem th
 
 ## Detailed design
 
-1. Introduce a top-level resource property "@decorators" to the JSON (also establishing a convention of using the "@" character to distinguish "meta" properties from actual properties that should be sent on an API call)
+1. Introduce a top-level resource property `@decorators` to the JSON (also establishing a convention of using the `@` character to distinguish "meta" properties from actual properties that should be sent on an API call)
     ```json
     {
       "@decorators": {}
@@ -87,8 +87,8 @@ JSON conversion:
 
 ## Unresolved questions
 
-- Should the "@decorators" property be an object or an array? Object (as currently specced) is simpler, but does not allow for duplicates, and does not preserve ordering.
-- Should we attempt to backfill existing decorators with this new contract (e.g. "@description")?
-- What about other meta-properties, like "scope", "parent" and "dependsOn"? Should these become decorators?
+- Should the `@decorators` property be an object or an array? Object (as currently specced) is simpler, but does not allow for duplicates, and does not preserve ordering.
+- Should we attempt to backfill existing decorators with this new contract (e.g. `@description`)?
+- What about other meta-properties, like `scope`, `parent` and `dependsOn`? Should these become decorators in the long term?
 - What about decorators on other declarations (parameters, variables, outputs)?
-- We already have the "metadata" field defined - should we try and reuse this rather than creating a new "@decorators" field?
+- We already have the `metadata` field defined - should we try and reuse this rather than creating a new `@decorators` field?
