@@ -54,9 +54,41 @@ It also pollutes the resource property namespace, which hasn't been a problem th
     }
     ```
 
+## Examples
+
+Bicep example:
+```bicep
+@description('hello!')
+@patch() // not currently supported, but might be one day
+resource foo 'Microsoft.DataFactory/factories@2018-06-01' = {
+  name: 'foo'
+  properties: {
+    patchMe: 'please'
+  }
+}
+```
+
+JSON conversion:
+```json
+{
+  "type": "Microsoft.DataFactory/factories",
+  "apiVersion": "2018-06-01",
+  "name": "foo",
+  "@decorators": {
+    "description": ["hello!"],
+    "patch": []
+  },
+  "properties": {
+    "patchMe": "please"
+  }
+}
+```
+
+
 ## Unresolved questions
 
 - Should the "@decorators" property be an object or an array? Object (as currently specced) is simpler, but does not allow for duplicates, and does not preserve ordering.
 - Should we attempt to backfill existing decorators with this new contract (e.g. "@description")?
 - What about other meta-properties, like "scope", "parent" and "dependsOn"? Should these become decorators?
 - What about decorators on other declarations (parameters, variables, outputs)?
+- We already have the "metadata" field defined - should we try and reuse this rather than creating a new "@decorators" field?
