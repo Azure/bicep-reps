@@ -5,62 +5,58 @@ Start Date: 2025-01-23
 Feature Status: Public
 ---
 
-<!-- Remove this comment and the prompts (in the form of blockquotes) for each section before submitting your PR -->
-
-# [Breaking Change (delete if not applicable)] Title - replace me with feature name
+# Standardize on decorator code generation
 
 ## Summary
 
-> Provide a brief paragraph explaining the feature.
-
-## Terms and definitions
-
-> Include any terms, definitions, or acronyms that are used in this design document to assist the reader.
+Introduce a new standardized pattern for how a decorator in the Bicep language is converted into JSON, which we can use for future decorators and possibly also consider adding for existing ones.
 
 ## Motivation
 
-> Outline the reasons behind implementing this feature, the use cases it supports, and the expected outcomes.
+Bicep offers the ability to augment resource (and other) declarations with [decorators](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/file#decorators), which are generally used to modify behavior of the declaration, without directly affecting the payload.
+
+For example, the following definition instructs the deployment engine to deploy the resources sequentially instead of concurrently:
+```bicep
+@batchSize(1)
+resource foo 'Microsoft.DataFactory/factories/pipelines@2018-06-01' = [for i in [0, 1]: {
+  name: 'foo${i}'
+}]
+```
+
+Currently, each decorator needs specific transformation logic to be added to Bicep, in order to pass information about what the user has configured to the deployments backend. For example, for batchSize, this impacts the value of the "copy.batchSize" property.
+
+We've gone with this approach mostly for back-compat reasons, but it adds complexity to Bicep code generation, and code generation complexities tend to build on top of each other exponentially.
+
+It also pollutes the resource property namespace, which hasn't been a problem thus far, but could create challenges with extensible resources.
 
 ## Detailed design
 
-> The core of the REP. Elaborate on the design and implementation with sufficient detail for someone familiar with Bicep to grasp. Provide detailed examples to illustrate how the feature is used and its implications on user experience.
+1. Introduce a top-level resource property "@decorators" to the JSON (also establishing a convention of using the "@" character to distinguish "meta" properties from actual properties that should be sent on an API call)
+    ```json
+    {
+      "@decorators": {}
+    }
+    ```
 
-### Client side changes
+1. Define a standard transformation that new decorators follow from Bicep -> JSON.
 
-### Server side changes (if applicable)
-
-### Microsoft.Resources/deployments API changes (if applicable)
-
-### Examples
-
-- Example 1
-```bicep
-```
-- Example 2
-```bicep
-```
-
-## Drawbacks
-
-> Discuss any potential drawbacks associated with this approach. Why might this *not* be a suitable choice? Consider implementation costs, integration with existing and planned features, and the migration cost for Bicep users. Clearly identify if it constitutes a breaking change.
-
-## Alternatives
-
-> Explore alternative designs that were considered and clarify why the chosen design stands out among possible options. Provide rationale and discuss the impact of not selecting other designs.
-
-## Rollout plan
-
-> Describe how you will deliver your feature. Does it need to be an experimental feature? If the feature involves backend changes, dose it need to be guarded by an ARM feature flag?
+    The following Bicep:
+    ```
+    @<name>(<arg1>, <arg2>, ...)
+    ```
+    
+    Would be sent on the wire as:
+    ```
+    {
+      "@decorators": {
+        "name": [<arg1>, <arg2>]
+      }
+    }
+    ```
 
 ## Unresolved questions
 
-> - What aspects of the design do you expect to resolve through the REP process before merging?
-> - What parts of the design do you anticipate resolving through feature implementation before stabilization?
-
-## Out of scope
-
-> - What related issues are considered out of scope for this REP but could be addressed independently in the future?
-
-**NB**: This section is not intended to capture unfinished elements of a design. For draft proposals, anything that is yet to be decided but must be addressed in order for a feature to be functional or GA should be explicitly called out in the **Design** section (or the **Unresolved questions** section). This section is instead intended to identify related issues or features on which you do not wish to make definitive decisions/foreclose any possibilities. Carefully think through how your design will avoid impacting these out of scope questions -- if your design does impact anything in this section, that is a strong indication that whatever is impacted was not out of scope at all. 
-
-
+- Should the "@decorators" property be an object or an array? Object (as currently specced) is simpler, but does not allow for duplicates, and does not preserve ordering.
+- Should we attempt to backfill existing decorators with this new contract (e.g. "@description")?
+- What about other meta-properties, like "scope", "parent" and "dependsOn"? Should these become decorators?
+- What about decorators on other declarations (parameters, variables, outputs)?
