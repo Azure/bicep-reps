@@ -92,3 +92,4 @@ JSON conversion:
 - What about other meta-properties, like `scope`, `parent` and `dependsOn`? Should these become decorators in the long term?
 - What about decorators on other declarations (parameters, variables, outputs)?
 - We already have the `metadata` field defined - should we try and reuse this rather than creating a new `@decorators` field?
+- What would we do with decorators that support expressions?
