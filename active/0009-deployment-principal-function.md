@@ -51,8 +51,9 @@ resource roleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 ## Detailed design
 - We plan to expose a minimal set of properties to satisfy the above use-cases, namely:
     - `objectId` - represents the unique identifier of the principal within a tenant
-    - `type` - i.e. `User`, `ServicePrincipal`
+    - `type` - i.e. `User`, `ServicePrincipal` (this is on-hold as ARM does not currently propagate the x-ms header for the principal type)
     - `tenantId` - represents the tenant where the user/service principal is managed
+    - `userPrincipalName` - NOTE: this will only exist for principal of type _User_
 - By scoping it down to these properties, this should make the implementation easier, as we can access these values via headers, and not have to make outgoing requests to MSGraph.
 
 ### Client side changes
