@@ -5,7 +5,7 @@ Start Date: 2025-01-23
 Feature Status: Public
 ---
 
-# Standardize on handling of scope
+# Formalize handling of "scope" 
 
 ## Summary
 
