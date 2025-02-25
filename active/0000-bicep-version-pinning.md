@@ -138,17 +138,23 @@ See syntax reference on [NuGet docs](https://learn.microsoft.com/nuget/concepts/
 1. For those unfamiliar with the notation, it may be confusing and require a learning curve, as this notation is not commonly used in other tools.
 2. Tools that can parse this syntax are scarce
 
-#### Option 2: npm/terraform syntax:
+#### Option 2: npm syntax:
 
+Inspired by [npm semver range spec](https://docs.npmjs.com/cli/v6/using-npm/semver#ranges).
 Uses `>, <, =, >=, <=` symbols for comparisons.
 For example:
-- `>=0.31.0 ` - accepts any version above and including 0.31.0
+- `>=0.31.0` - accepts any version above and including 0.31.0
 - `<0.31.0` - accepts any version below, but not including 0.31.0
-- `>=0.31.0, <1.0.0` - accepts any versions between 0.31.0 (inclusive), and 1.0.0 (exclusive)
+- `>=0.31.0 <1.0.0` - accepts any versions between 0.31.0 (inclusive), and 1.0.0 (exclusive)
+- `=0.31.0` - equivalent to `0.31.0`
+- `>=1.2` - equivalent to `>=1.2.0`
+- `>=1` - equivalent to `>=1.0.0`
+- `^1.2.3` - equivalent to `>=1.2.3 <2.0.0`
+- `~1.2.3` - equivalent to `>=1.2.3 <1.3.0`
 
 *Tools that can parse this syntax*:
     - .NET ([semver package](https://semver-nuget.org/v3.0.x/)) - this would be useful for parsing in the Bicep & Ev2 .NET SDK codebase
-    - Python ([packaging library](https://packaging.pypa.io/en/stable/specifiers.html#packaging.specifiers.SpecifierSet)) - this would be useful for parsing in the AzCLI codebase
+    - Python ([packaging library](https://python-semanticversion.readthedocs.io/en/latest/guide.html#the-simplespec-scheme)) - this would be useful for parsing in the AzCLI codebase
     - Javascript ([node-semver](https://github.com/npm/node-semver)) - would be useful for bicep-node
     - Go ([semver package](https://pkg.go.dev/github.com/Masterminds/semver/v3@v3.3.1)) - this would be useful for parsing in the Ev2 CLI codebase
 
@@ -166,10 +172,6 @@ For example:
 
 1. Could be considered more verbose in certain scenarios, e.g. to specify Bicep to match any patch version of `0.31`, the syntax would be `>=0.31.0 <0.32.0`. Likewise to match any minor version of `0`, the syntax would be `>=0 <1`.
 
-
-**Recommendation** - Due to the vast usage of the "npm/terraform syntax", and how many more tools support parsing this syntax, it seems like the better choice here. 
-
-
 **3. Wildcard syntax**
 
 Users can use `*` to indicate that anything in the specified segment of the version is acceptable. This can be used as syntactic sugar for the version comparison syntax. The following are some examples:
@@ -182,6 +184,8 @@ However, we should impose the following restrictions:
     - Reason: This is to prevent ambiguous snytaxes like this: `>=1.*`. It is hard to reason about the allowed range in this case, i.e. does the range start from `1.0.0` or `1.1.2` or `1.3.5` or something else?
 2. If a version number is replaced with a wildcard, then all later version numbers must also be wildcards. Thus `2.*.6` is an invalid wildcard version. 
     - Reason: Most semver parsing tools (including the [tools sampled above](#option-2-npmterraform-syntax)) either do not support this, or they ignore anything after the `*`.
+
+✅ We chose to go with Option 2 as it is more commonly used, flexible, and easy to read. See more details under [unresolved questions](#unresolved-questions).
 
 ### VSCode experience
 Because the VSCode extension version is tightly coupled to the Bicep compiler version. If we fail the Bicep compilation, the user if forced to update their VSCode extension version; this is not a great user experience especially when working across multiple Bicep repos that they even might not own. 
@@ -233,6 +237,26 @@ However, the downside with this approach is if usage of the same version for mul
 
 2. [From PR comment] Are more users using Bicep CLI or Azure CLI. We may need to ask the community. If more are using Bicep CLI, we may need to decide on how to provide a better experience there for users working across multiple repos that they may not necessarily own.
 
+    ✅  Feedback from community was AzCLI is used more widely. Decision was to go ahead and implement for AzCLI, and revisit Bicep CLI experience later.
+
+3. Which versioning syntax to go with?
+
+    - Some concerns brought up was consistency with future module/extension version range addition, since OCI artifact versions are arbitrary and not necessarily numeric or semver.
+    - Some ideas were brought up:
+        - Use `*` wildcard. However isn't versatile enough for non-numeric usage.
+        - Use Regex. This is powerful, but could potentially intimidating/barrier to entry for unfamiliar users.
+
+    ✅ Decision was to stick to `>,<,>=,<=` syntax for version range syntax for both Bicep and module/extension versioning. The caveat is that version ranges will not be supported for module/extension OCI artifacts not following semver. In those cases, users will need to use exact versions.
+
+4. Should we support `^` and `~` prefixes as used by [npm](https://docs.npmjs.com/cli/v6/using-npm/semver#advanced-range-syntax)?
+
+    ✅ Decision was to include them as they is widely used. We will need to have good documentation about them as it is not immediately obvious what the symbols mean.
+
+5. Should we build our own parsers or use libraries/packages?
+
+    ✅ Start with libraries/packages as long as they are consistent with each other and support all that we need. Reconsider writing our own if there are concerns.
+
+    
 ## Out of scope
 - Making this work in AzPwsh would be nice to have as the owning team is now more open for us to make changes, but would involve significant work to make it at par with AzCLI. This can be considered future enhancement.
 - There were concerns about how this would work with bicepconfig.json resolution mechanism. Today, the closest bicepconfig.json file is used to resolve configurations relative to the bicep/bicepparam file being compiled. Since there exists no merge process for the bicepconfig.json files, this could be problematic in the cases where users want to have repo-wide settings honored even with child folders containing their own bicepconfig.json files. This limitation, however, has existed already, and hence orthogonal to this proposal; we could adopt this proposal without necessarily solving the bicepconfig.json limitation. 
