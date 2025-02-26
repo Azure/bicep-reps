@@ -276,8 +276,8 @@ module baz 'foo.bicep' = {
 module bar 'foo.bicep' = {
   extensionConfigs: {
     kubernetes: {
-       ...kubernetes
-       namespace: 'myOtherNamespace'
+      ...kubernetes
+      namespace: 'myOtherNamespace'
     }
   }
 }
@@ -439,10 +439,18 @@ main.json - The root deployment
             // Expressions are not allowed to reference secure parameters.
             // This will be evaluated out to the deployment PUT format during preprocessing and deployment
             "k8s": {
-              "namespace": "[parameters('namespace')]",
-              "clusterType": "Managed",
-              "managedClusterId": "[resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01')]",
-              "credentialType": "Admin",
+              "namespace": {
+                "value": "[parameters('namespace')]"
+              },
+              "clusterType": {
+                "value": "Managed"
+              },
+              "managedClusterId": {
+                "value": "[resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')),'2024-02-01')]"
+              },
+              "credentialType": {
+                "value": "Admin"
+              },
               // key vault example
               "kubeConfig": {
                 "keyVaultReference": {
@@ -453,7 +461,9 @@ main.json - The root deployment
                 }
               },
               // custom example for secure property (NOT allowed for stack deployments)
-              "kubeConfig": "[...]"
+              "kubeConfig": {
+                "value": "[...]"
+              }
             }
           },
           "template": {
@@ -504,10 +514,18 @@ Here is an example:
           "extensionConfigs": {
             // what we will inherit
             "k8s": {
-              "namespace": "[parameters('namespace')]",
-              "clusterType": "Managed",
-              "managedClusterId": "[resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01')]",
-              "credentialType": "Admin",
+              "namespace": {
+                "value": "[parameters('namespace')]"
+              },
+              "clusterType": {
+                "value": "Managed"
+              },
+              "managedClusterId": { 
+                "value": "[resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName')), '2024-02-01')]"
+              },
+              "credentialType": {
+                "value": "Admin"
+              },
               // key vault example
               "kubeConfig": {
                 "keyVaultReference": {
@@ -698,10 +716,12 @@ Deployment GET:
   ],
   "outputResources": [ // "outputResources" is only populated when the deployment is successful. Stacks uses operations to peel through failed deployment resources.
     { // NEW: Extensible resource
-      "extensionName": "Kubernetes",
-      "extensionVersion": "1.0.0",
-      "extensionConfigId": "<ID from extension>",
-      "extensibleResourceType": "core/Service",
+      "extension": {
+        "name": "Kubernetes",
+        "version": "1.0.0",
+        "configId": "<ID from extension>",
+      },
+      "resourceType": "core/Service",
       "apiVersion": "v1",
       "identifiers": {
         "metadata": {
@@ -721,14 +741,12 @@ Operation GET for extensible resource:
 ```diff
 {
   ...
-  "type": "Microsoft.Resources/deployments",
   "properties": {
     ...
     "provisioningOperation": "Create",
     "provisioningState": "Succeeded",
     "targetResource": {
-      "resourceType" null, // This field cannot be used because of swagger types expecting an ARM resource type.
-+     "extensibleResourceType": "core/Service",
++     "resourceType": "core/Service",
 +     "apiVersion": "v1",
 +     "symbolicName": "myService",
 +     "identifiers": {
@@ -753,7 +771,6 @@ Operation GET for ARM resource:
 ```diff
 {
   ...
-  "type": "Microsoft.Resources/deployments",
   "properties": {
     ...
     "provisioningOperation": "Create",
@@ -996,3 +1013,4 @@ validated.
 
 - Deployment stack resource locks on extension resources (in ARM, this is deny assignments that prevent deletion or
   update of resources while being managed by the stack).
+- Azure auth for kube extension.
