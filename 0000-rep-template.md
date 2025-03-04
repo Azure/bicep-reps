@@ -1,5 +1,5 @@
 ---
-REP Number: <Fill me in with a four-digit number matching the pull request number; Update AFTER PR is approved and BEFORE is merged.>
+REP Number: <Fill me in with a four-digit number in double quotes (otherwise it's octal) matching the pull request number; Update AFTER PR is approved and BEFORE is merged.>
 Author: <github username (First Name and Last Name)>
 Start Date: <Today's Date, YYYY-MM-DD>
 Feature Status: <Private Preview | Public Preview | Public>
