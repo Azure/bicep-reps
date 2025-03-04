@@ -1,5 +1,5 @@
 ---
-REP Number: <Fill me in with a four-digit number matching the pull request number; Update AFTER PR is approved and BEFORE is merged.>
+REP Number: '0013'
 Author: anthony-c-martin (Anthony Martin)
 Start Date: 2025-01-23
 Feature Status: Public
@@ -31,10 +31,10 @@ It also pollutes the resource property namespace, which hasn't been a problem th
 
 ## Detailed design
 
-1. Introduce a top-level resource property `@decorators` to the JSON (also establishing a convention of using the `@` character to distinguish "meta" properties from actual properties that should be sent on an API call)
+1. Introduce a top-level resource property `@options` to the JSON (also establishing a convention of using the `@` character to distinguish "meta" properties from actual properties that should be sent on an API call)
     ```json
     {
-      "@decorators": {}
+      "@options": {}
     }
     ```
 
@@ -48,7 +48,7 @@ It also pollutes the resource property namespace, which hasn't been a problem th
     Would be sent on the wire as:
     ```
     {
-      "@decorators": {
+      "@options": {
         "name": [<arg1>, <arg2>]
       }
     }
@@ -74,7 +74,7 @@ JSON conversion:
   "type": "Microsoft.DataFactory/factories",
   "apiVersion": "2018-06-01",
   "name": "foo",
-  "@decorators": {
+  "@options": {
     "description": ["hello!"],
     "patch": []
   },
@@ -83,13 +83,3 @@ JSON conversion:
   }
 }
 ```
-
-
-## Unresolved questions
-
-- Should the `@decorators` property be an object or an array? Object (as currently specced) is simpler, but does not allow for duplicates, and does not preserve ordering.
-- Should we attempt to backfill existing decorators with this new contract (e.g. `@description`)?
-- What about other meta-properties, like `scope`, `parent` and `dependsOn`? Should these become decorators in the long term?
-- What about decorators on other declarations (parameters, variables, outputs)?
-- We already have the `metadata` field defined - should we try and reuse this rather than creating a new `@decorators` field?
-- What would we do with decorators that support expressions?
