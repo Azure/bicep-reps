@@ -54,6 +54,8 @@ It also pollutes the resource property namespace, which hasn't been a problem th
     }
     ```
 
+The benefit of this standardized transformation is that conversion between Bicep and JSON (both ways) can be purely mechanical - meaning it doesn't need any understanding of what each decorator is doing.
+
 ## Examples
 
 Bicep example:
