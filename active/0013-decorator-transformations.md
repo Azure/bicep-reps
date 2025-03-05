@@ -61,7 +61,8 @@ The benefit of this standardized transformation is that conversion between Bicep
 Bicep example:
 ```bicep
 @description('hello!')
-@patch() // not currently supported, but might be one day
+@deployIfNotExists() // check exists proposal
+@waitUntil(x => x.ProvisionStatus == 'Succeeded', 'PT20S') // wait and retry proposal
 resource foo 'Microsoft.DataFactory/factories@2018-06-01' = {
   name: 'foo'
   properties: {
@@ -77,8 +78,14 @@ JSON conversion:
   "apiVersion": "2018-06-01",
   "name": "foo",
   "@options": {
-    "description": ["hello!"],
-    "patch": []
+    "description": [
+      "hello!"
+    ],
+    "deployIfNotExists": [],
+    "waitUntil": [
+      "[lambda('x', equals(lambdaVariables('x').ProvisionStatus, 'Succeeded'))]",
+      "PT20S"
+    ]
   },
   "properties": {
     "patchMe": "please"
