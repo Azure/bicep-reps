@@ -9,7 +9,10 @@ Feature Status: Public
 
 ## Summary
 
-Introduce a new standardized pattern for how a decorator in the Bicep language is converted into JSON, which we can use for future decorators and possibly also consider adding for existing ones.
+Introduce a new standardized pattern for how a decorator in the Bicep language can converted into JSON, which we can use for future decorators and possibly also consider adding for existing ones.
+
+> [!NOTE]
+> This spec focuses primarily on decorators which must be understood by the Deployment Engine (deploy-time directives), whereas many of the existing decorators we support are compile-time directives. The current motivation for this spec is for supporting deploy-time directives on resource & module declarations. A similar approach may be followed if deploy-time directives are needed on other forms of syntax in future, but it is not a requirement for compile-time directives.
 
 ## Motivation
 
