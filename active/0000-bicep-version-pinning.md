@@ -34,8 +34,7 @@ This approach poses a significant risk because when a new Bicep version is relea
 Implementing Bicep version pinning would ensure reproducible Bicep compilations across all deployment workflows, whether executed locally or within CI/CD pipelines. This feature would enhance stability and predictability, providing users with greater control over their deployment environments. Additionally, it would be crucial for enabling the use of Bicep natively in Ev2 to ensure safe deployment practices.
 
 ## Detailed design
-### Client side changes
-#### 1a. Add new property in bicepconfig.json
+### Add new version property in bicepconfig.json
 
 The following example shows the proposed `version` property syntax to be added in the _bicepconfig.json_ file. See [version constraint syntax below](#version-constraint-syntax) for more details:
 
@@ -49,9 +48,9 @@ The following example shows the proposed `version` property syntax to be added i
 
 The appropriate Bicep version will be determined by using the closest `bicepconfig.json` file to the Bicep file being compiled, merged with the default configuration.
 
-#### 1b. Cross-module compilation
+#### Cross-module compilation
 
-Each module can be constrained to a different version requirement specified in the closest `bicepconfig.json` to it. This will be beneficial when version ranges support is added, allowing a module author to set a minimum version for compatibility if the module uses features introduced after said version. 
+Each module can be constrained to a different version requirement specified in the closest `bicepconfig.json` to it. This will be beneficial for version ranges, allowing a module author to set a minimum version for compatibility if the module uses features introduced after said version. 
 
 Having said that, compilation of modules with conflicting version requirements should fail – if a module's Bicep version constraint does not match the installed Bicep binary, an error should be surfaced within the module and wherever the module is referenced. The following example illustrates this concept:
 
@@ -64,13 +63,6 @@ _bicepconfig.json_
     "bicep": {
         "version": "0.31.92"
     }
-}
-```
-
-_main.bicep_
-```bicep
-module mod 'modules/mod.bicep' = { // <--  The referenced module has errors.bicep (BCP104)
-    name: 'mod'
 }
 ```
 
@@ -88,11 +80,138 @@ _modules/mod.bicep_
 resource otherResource 'Test.RP' = {} // <-- Bicep version "0.31.92" was used for compilation, but version "0.15.0" is required in configuration file (BCPxxx)
 ```
 
+_main.bicep_
+```bicep
+module mod 'modules/mod.bicep' = { // <--  The referenced module has errors.bicep (BCP104)
+    name: 'mod'
+}
+```
+
+
 No specific change to the codebase is expected to achieve this, as Bicep already handles this today (i.e. if there are errors in a referenced module, an error is surfaced on all the references).
 
 ----------------
 
-#### 2. Update Bicep CLI
+### Version constraint syntax
+
+Users can specify version constraints in Bicep using either exact versions or version ranges. This flexibility allows for precise control over the versions used in Bicep projects. Bicep adheres to the [Semantic Versioning 2.0 specification](https://semver.org/spec/v2.0.0.html) for its [published releases](https://github.com/Azure/bicep/releases), ensuring consistency and predictability in versioning.
+
+However, the SemVer spec does not include a standard for expressing version ranges.
+
+Inspired by the [npm version range specification](https://docs.npmjs.com/cli/v6/using-npm/semver), the following outlines the version syntaxes we will use for Bicep:
+
+**1. Exact version syntax** 
+
+For exact version constraint, the allowable syntax should be the version itself, i.e. `1.2.3`.
+
+**2. Version range syntax**
+#### Comparators
+Expresses a set of comparators which specify versions that satisfy the range using the following `>, <, >=, <=` symbols for comparisons.
+
+Examples:
+- `>=0.31.0` - accepts any version above and including 0.31.0
+- `<0.31.0` - accepts any version below, but not including 0.31.0
+- `>=0.31.0 <1.0.0` - accepts any versions between 0.31.0 (inclusive), and 1.0.0 (exclusive)
+- `=0.31.0` - equivalent to `0.31.0`
+- `>=1.2` - equivalent to `>=1.2.0`
+- `>=1` - equivalent to `>=1.0.0`
+
+#### Tilde Ranges
+Uses `~` to allow patch-level changes if a minor version is specified on the comparator. Allow minor-level changes if not. 
+
+Examples:
+- `~1.2.3` - equivalent to `>=1.2.3 <1.3.0`
+- `~1.2` - equivalent to `>=1.2.0 <1.3.0`
+- `~1` - equivalent to `>=1.0.0 <2.0.0`
+
+#### Caret Ranges
+Uses `^` to allow minor and patch-level changes.
+
+Examples:
+- `^1.2.3` - equivalent to `>=1.2.3 <2.0.0`
+- `^1.2` - equivalent to `>=1.2.0 <2.0.0`
+- `^1` - equivalent to `>=1.0.0 <2.0.0`
+
+
+### Update Bicep CLI
+#### New commands
+There are various tools that will need to respect the version constraints and install the appropriate Bicep version, for example AzCLI and Ev2 PS cmdlet & CLI. These tools are written in varying languages (AzCLI is written in Python, Ev2 CLI is written in Go). Having the bicepconfig.json discovery logic and version constraint parsing spread across multiple tools would be problematic if we decided to change how bicepconfig.json resolution works (e.g. if we added merge semantics). In order to avoid having version discovery and parsing logic spread across multiple tools that work with the Bicep, we introduce a new `resolve-version` command within the Bicep CLI that the aforementioned tools can invoke to determine what version constraints apply to [a] given Bicep file(s), i.e.
+
+- `bicep resolve-version -f <file or glob> --max-compatible --versions <array-of-versions>`: Returns the maximum compatible version among a provided list of version that satisfies the version constraint for the file(s) specified:
+    - Looks at the bicep file (or iterates each file if glob is provided) and resolves the version constraint from the closest bicepconfig.json to the bicep file. 
+        - We could try to determine the _effective version range_ by combining the version ranges into one and then use the effective version range to find the maximum satisfying version from the provided list of versions. Albeit potentially faster, the implementation would likely be complex.
+        - A simpler approach would be to iterate through the version constraints and for each constraint, determine the maximum satisfying version from the versions provided in the command input and performing the logic for the scenarios outlined below. 
+        
+    - The following scenarios apply:
+
+        **Scenario 1:** _If the maximum satisfying versions do not match for each version constraint, then throw an error because that indicates the version constraints are incompatible_. For example:
+        ```js
+        // versions provided in the command input
+        var versions = [
+            '1.0.0',
+            '1.5.8',
+            '2.0.0',
+            '2.1.2',
+        ]
+
+        // version constraints resolved from the bicepconfig.json files closest to the input files
+        var versionRanges = [
+            '>=1.0 <2.0', // max satisfying = 1.5.8
+            '>=2.0' // max satisfying = 2.1.2
+        ]
+
+        // throw error
+        ```
+
+        **Scenario 2:** _If no version constraints are found for any input file, then return an empty response or null_. For example:
+        ```js
+        var versions = [
+            '1.0.0',
+            '1.5.8',
+            '2.0.0',
+            '2.1.2',
+        ]
+
+        var versionRanges = []
+
+        // return { maxVersion: null }
+        ```
+
+        **Scenario 3:** _If none of the versions provided satisfy the version constraints, then throw an error_. For example:
+        ```js
+        var versions = [
+            '1.0.0',
+            '1.5.8',
+            '2.0.0',
+            '2.1.2',
+        ]
+
+        var versionRanges = [
+            '>=3.0' // outside the range of the provided versions
+        ]
+
+        // throw error
+        ``` 
+
+        **Scenario 4:** _If all the version constraints are compatible, and all of them detect the same maximum satisfying version from the provided list of versions, then return the maximum satisfying version in the output_. For example:
+        ```js
+        var versions = [
+            '1.0.0',
+            '1.5.8',
+            '2.0.0',
+            '2.1.2',
+        ]
+
+        var versionRanges = [
+            '>=1.0', // max satisfying = 2.1.2
+            '>=1.5.8 <3.0.0', // max satisfying = 2.1.2
+            '~2.1.1' // max satisfying = 2.1.2
+        ]
+
+        // return return { maxVersion: '2.1.2' }
+        ```
+------    
+#### Version check during compilation
 The Bicep CLI should be updated to check for the version constraint in the configuration.
 
 If a user runs Bicep CLI directly to build a bicep file, we will try to resolve the appropriate version constraint from the closest `bicepconfig.json`:
@@ -102,18 +221,49 @@ If a user runs Bicep CLI directly to build a bicep file, we will try to resolve 
 
 ----------------
 
-### Version constraint syntax
+### VSCode experience
+Because the VSCode extension version is tightly coupled to the Bicep compiler version. If we fail the Bicep compilation, the user if forced to update their VSCode extension version; this is not a great user experience especially when working across multiple Bicep repos that they even might not own. 
 
-Users can specify version constraints in Bicep using either exact versions or version ranges. This flexibility allows for precise control over the versions used in Bicep projects. Bicep adheres to the [Semantic Versioning 2.0 specification](https://semver.org/spec/v2.0.0.html) for its [published releases](https://github.com/Azure/bicep/releases), ensuring consistency and predictability in versioning.
+Ideally, we would decouple the extension from the Bicep version, but that would be an expensive undertaking.
 
-However, the SemVer spec does not include a standard for expressing version ranges using wildcards or comparators. Nevertheless, there exists a few options that are used in other frameworks and tools, including npm, terraform, and NuGet.
+An acceptable solution here is: instead of throwing compiler errors, we will warn the user if their VSCode extension version doesn't match the configured version constraint. 
+This way the user is aware of the mismatch, but we do not completely block them from proceeding with compilation.
+We will need to clearly document this behavior in which the pinning is not strictly enforced in VSCode, so that users do not have the wrong expectations.
 
-**1. Exact version syntax** 
+--------------
 
-For exact version constraint, the allowable syntax should be the version itself, i.e. `1.2.3`.
+### AzCLI updates
+#### Basic mechanism
+The AzCLI bicep module should be enhanced to install the latest version that satisfies the version constraints. The following is the proposed flow that AzCLI should follow:
+- Download the latest Bicep executable into a separate location from the location used today for Bicep exe's managed by AzCLI e.g. `~\.azure\bin\helper\bicep-latest.exe`.
+- Invoke aka.ms/BicepReleases to get the list of Bicep version tags.
+- Invoke the newly proposed `resolve-version` CLI command (see [details](#new-commands)), passing along the list of Bicep version tags and the Bicep file(s) being compiled.
+- If a maximum version is succesfully returned from the `resolve-version` CLI command, download it and install it as usual into `~\.azure\bin\bicep.exe`.
+- If no version constraints are found, AzCLI should default to using locally installed version (or downloading the latest version if no Bicep is not installed locally).
 
-**2. Version comparison syntax**
+### Note about `use_binary_from_path` config value
+When `use_binary_from_path` AzCLI config is set to `true`, or `if_found_in_ci`, AzCLI will invoke the bicep binary found in the PATH environment variable. With version pinning, the version in PATH would not necessarily correspond to the constraint resolved from the `bicepconfig.json`. 
 
+We should therefore set `use_binary_from_path` to `false` if a version constraint is found (this is similar to the behavior when a user runs `az bicep install --version` to install a specific version of Bicep. See more details on [this PR](https://github.com/Azure/azure-cli/pull/25541)).
+
+## Drawbacks
+- **Degraded visibility into registry module version constraints:** When inspecting published module source bicep file, it wouldn't be immediately clear what version was used to compile the module just by looking at the bicep file. This is because version information would be codified in the `bicepconfig.json` which is not published with the sources. However, the user can still discern the version used with the aid of the VSCode extension; the user can navigate to the compiled JSON which contains metadata about which version was used to compile the module. 
+- **Inability to specify version override for specific individual files:** Due to how `bicepconfig.json` works, it applies to all files in the directory it is placed in. Users cannot easily override the Bicep version for individual files. This limitation can potentially be restrictive in scenarios where there may be a need to compile specific individual files with different Bicep versions for compatibility or testing purposes.
+
+## Alternatives
+### Specify Bicep version in `.bicep` files:
+This might look something like the following:
+
+```bicep
+bicep.version = '0.31.92'
+
+resource test 'Test.RP' = {...}
+```
+This approach provides more granular control over the Bicep version used for each individual file, which makes it clear which version is required for a specific file, which could be useful in scenarios where different files need to be compiled with different versions. It would also be easier to discern what version was used to compile a published module by inspecting the source.
+
+However, the downside with this approach is if usage of the same version for multiple Bicep files is desired, it would require specifying the `version` in each file which can be a maintenance overhead.
+
+### Version syntaxes considered
 #### Option 1: NuGet-like syntax:
 
 The main distinguishing feature of the NuGet version range is it uses a syntax similar to the [mathematical interval notation](https://www.math.net/interval-notation), i.e. `[]`, `()` to specify inclusivity vs exclusivity respectively.
@@ -186,44 +336,6 @@ However, we should impose the following restrictions:
     - Reason: Most semver parsing tools (including the [tools sampled above](#option-2-npmterraform-syntax)) either do not support this, or they ignore anything after the `*`.
 
 ✅ We chose to go with Option 2 as it is more commonly used, flexible, and easy to read. See more details under [unresolved questions](#unresolved-questions).
-
-### VSCode experience
-Because the VSCode extension version is tightly coupled to the Bicep compiler version. If we fail the Bicep compilation, the user if forced to update their VSCode extension version; this is not a great user experience especially when working across multiple Bicep repos that they even might not own. 
-
-Ideally, we would decouple the extension from the Bicep version, but that would be an expensive undertaking.
-
-An acceptable solution here is: instead of throwing compiler errors, we'd warn the user if their VSCode extension version doesn't match the configured version constraint. 
-This way the user is aware of the mismatch, but we do not completely block them from proceeding with compilation.
-We will need to clearly document this behavior in which the pinning is not strictly enforced in VSCode, so that users do not have the wrong expectations.
-
-
-### AzCLI updates
-#### Basic mechanism
-- The AzCLI bicep module should be enhanced to parse the appropriate `bicepconfig.json` file by recursively searching upwards from the current directory. It should then install the latest Bicep version that satisfies the specified version constraints. 
-    - For example, given the version constraint `>=0.31.0 <0.32.0` and the available Bicep release tags `[0.21.14, 0.31.1, 0.31.92, 0.32.45]`, AzCLI would download version `0.31.92`.
-- If no version constraints are found, AzCLI should default to using locally installed version (or downloading the latest version if no Bicep is not installed locally).
-
-### Note about `use_binary_from_path` config value
-When `use_binary_from_path` AzCLI config is set to `true`, or `if_found_in_ci`, AzCLI will invoke the bicep binary found in the PATH environment variable. With version pinning, the version in PATH would not necessarily correspond to the constraint resolved from the `bicepconfig.json`. 
-
-We should therefore set `use_binary_from_path` to `false` if a version constraint is found (this is similar to the behavior when a user runs `az bicep install --version` to install a specific version of Bicep. See more details on [this PR](https://github.com/Azure/azure-cli/pull/25541)).
-
-## Drawbacks
-- **Degraded visibility into registry module version constraints:** When inspecting published module source bicep file, it wouldn't be immediately clear what version was used to compile the module just by looking at the bicep file. This is because version information would be codified in the `bicepconfig.json` which is not published with the sources. However, the user can still discern the version used with the aid of the VSCode extension; the user can navigate to the compiled JSON which contains metadata about which version was used to compile the module. 
-- **Inability to specify version override for specific individual files:** Due to how `bicepconfig.json` works, it applies to all files in the directory it is placed in. Users cannot easily override the Bicep version for individual files. This limitation can potentially be restrictive in scenarios where there may be a need to compile specific individual files with different Bicep versions for compatibility or testing purposes.
-
-## Alternatives
-### Specify Bicep version in `.bicep` files:
-This might look something like the following:
-
-```bicep
-bicep.version = '0.31.92'
-
-resource test 'Test.RP' = {...}
-```
-This approach provides more granular control over the Bicep version used for each individual file, which makes it clear which version is required for a specific file, which could be useful in scenarios where different files need to be compiled with different versions. It would also be easier to discern what version was used to compile a published module by inspecting the source.
-
-However, the downside with this approach is if usage of the same version for multiple Bicep files is desired, it would require specifying the `version` in each file which can be a maintenance overhead.
 
 ## Rollout plan
 
