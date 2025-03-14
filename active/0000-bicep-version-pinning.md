@@ -135,9 +135,9 @@ Examples:
 
 ### Update Bicep CLI
 #### New commands
-There are various tools that will need to respect the version constraints and install the appropriate Bicep version, for example AzCLI and Ev2 PS cmdlet & CLI. These tools are written in varying languages (AzCLI is written in Python, Ev2 CLI is written in Go). Having the bicepconfig.json discovery logic and version constraint parsing spread across multiple tools would be problematic if we decided to change how bicepconfig.json resolution works (e.g. if we added merge semantics). In order to avoid having version discovery and parsing logic spread across multiple tools that work with the Bicep, we introduce a new `resolve-version` command within the Bicep CLI that the aforementioned tools can invoke to determine what version constraints apply to [a] given Bicep file(s), i.e.
+There are various tools that will need to respect the version constraints and install the appropriate Bicep version, for example AzCLI and Ev2 PS cmdlet & CLI. These tools are written in varying languages (AzCLI is written in Python, Ev2 CLI is written in Go). Having the bicepconfig.json discovery logic and version constraint parsing spread across multiple tools would be problematic if we decided to change how bicepconfig.json resolution works (e.g. if we added merge semantics). In order to avoid having version discovery and parsing logic spread across multiple tools that work with the Bicep, we introduce a new `versioning` command within the Bicep CLI that the aforementioned tools can invoke to determine what version constraints apply to [a] given Bicep file(s), i.e.
 
-- `bicep resolve-version -f <file or glob> --max-compatible --versions <array-of-versions>`: Returns the maximum compatible version among a provided list of version that satisfies the version constraint for the file(s) specified:
+- `bicep versioning max-compatible -f <file or glob> --versions <array-of-versions>`: Returns the maximum compatible version among a provided list of version that satisfies the version constraint for the file(s) specified:
     - Looks at the bicep file (or iterates each file if glob is provided) and resolves the version constraint from the closest bicepconfig.json to the bicep file. 
         - We could try to determine the _effective version range_ by combining the version ranges into one and then use the effective version range to find the maximum satisfying version from the provided list of versions. Albeit potentially faster, the implementation would likely be complex.
         - A simpler approach would be to iterate through the version constraints and for each constraint, determine the maximum satisfying version from the versions provided in the command input and performing the logic for the scenarios outlined below. 
@@ -210,6 +210,10 @@ There are various tools that will need to respect the version constraints and in
 
         // return return { maxVersion: '2.1.2' }
         ```
+
+- Other ideas for commands that could be added later on:
+    - `bicep versioning min-compatible -f <file> --versions <array of versions>`
+    - `bicep versioning satisfies --version <version> --range <range>`
 ------    
 #### Version check during compilation
 The Bicep CLI should be updated to check for the version constraint in the configuration.
@@ -237,14 +241,17 @@ We will need to clearly document this behavior in which the pinning is not stric
 The AzCLI bicep module should be enhanced to install the latest version that satisfies the version constraints. The following is the proposed flow that AzCLI should follow:
 - Download the latest Bicep executable into a separate location from the location used today for Bicep exe's managed by AzCLI e.g. `~\.azure\bin\helper\bicep-latest.exe`.
 - Invoke aka.ms/BicepReleases to get the list of Bicep version tags.
-- Invoke the newly proposed `resolve-version` CLI command (see [details](#new-commands)), passing along the list of Bicep version tags and the Bicep file(s) being compiled.
-- If a maximum version is succesfully returned from the `resolve-version` CLI command, download it and install it as usual into `~\.azure\bin\bicep.exe`.
+- Invoke the newly proposed `versioning` CLI command (see [details](#new-commands)), passing along the list of Bicep version tags and the Bicep file(s) being compiled.
+- If a maximum version is succesfully returned from the `versioning` CLI command, download it and install it as usual into `~\.azure\bin\bicep.exe`.
 - If no version constraints are found, AzCLI should default to using locally installed version (or downloading the latest version if no Bicep is not installed locally).
 
 ### Note about `use_binary_from_path` config value
 When `use_binary_from_path` AzCLI config is set to `true`, or `if_found_in_ci`, AzCLI will invoke the bicep binary found in the PATH environment variable. With version pinning, the version in PATH would not necessarily correspond to the constraint resolved from the `bicepconfig.json`. 
 
 We should therefore set `use_binary_from_path` to `false` if a version constraint is found (this is similar to the behavior when a user runs `az bicep install --version` to install a specific version of Bicep. See more details on [this PR](https://github.com/Azure/azure-cli/pull/25541)).
+
+### Version syntax parsing
+Since there is no official standard for the syntax of semver ranges, different tools/libraries that implement the npm-like syntax often have subtle or major differences. As a result, we will implement our own parser in Bicep so that we can better control what is supported & not supported. 
 
 ## Drawbacks
 - **Degraded visibility into registry module version constraints:** When inspecting published module source bicep file, it wouldn't be immediately clear what version was used to compile the module just by looking at the bicep file. This is because version information would be codified in the `bicepconfig.json` which is not published with the sources. However, the user can still discern the version used with the aid of the VSCode extension; the user can navigate to the compiled JSON which contains metadata about which version was used to compile the module. 
