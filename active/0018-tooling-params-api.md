@@ -209,10 +209,12 @@ input <symbolic_name> '<type_name>' [<optional_type>] [with {
 ```
 
 This option has the following pros and cons:
+
 Pros:
 * Obvious way of attaching a type to an input.
 * Fits more clearly with the JSON parameters format.
 * Has a "name" that can be used to identify it in the JSON format.
+
 Cons:
 * More typing, because the `with` block would require any config to be wrapped in an object.
 * Combining it with other functions feels more clunky - e.g. it would be nice to be able to write;
