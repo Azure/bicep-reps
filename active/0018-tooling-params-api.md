@@ -9,7 +9,7 @@ Feature Status: Public
 
 ## Summary
 
-Introduce a new top-level keyword or function specific to `.bicepparam` files, for the sole purpose of making it possible for external tooling to supply values after compiling to `.json` parameters.
+Introduce a new function specific to `.bicepparam` files, for the sole purpose of making it possible for external tooling to supply values after compiling to `.json` parameters.
 
 ## Motivation
 
@@ -55,7 +55,7 @@ Reading an env var:
 var myEnvVar = readInput('sys.envVar', 'MY_ENV_VAR')
 ```
 
-Reading an env var:
+Reading an CLI argument:
 ```bicep
 var myCliArg = readInput('sys.cliArgument', 'cli-arg')
 ```
@@ -201,9 +201,21 @@ API Request:
 ```
 
 ## Other options considered
-I briefly considered using a statement rather than a function - e.g.:
+Another option is to use a statement rather than a function - e.g.:
 ```bicep
 input <symbolic_name> '<type_name>' [<optional_type>] [with {
   // config
 }]
 ```
+
+This option has the following pros and cons:
+Pros:
+* Obvious way of attaching a type to an input.
+* Fits more clearly with the JSON parameters format.
+* Has a "name" that can be used to identify it in the JSON format.
+Cons:
+* More typing, because the `with` block would require any config to be wrapped in an object.
+* Combining it with other functions feels more clunky - e.g. it would be nice to be able to write;
+    ```bicep
+    var myObject = json(getBinding('sys.envVar', 'MY_ENV_VAR'))
+    ```
