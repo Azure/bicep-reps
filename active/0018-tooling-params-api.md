@@ -23,7 +23,7 @@ The challenge that this spec sets out to solve is that there is no way to (a) ex
 ## Detailed design
 
 ### Overview
-1. Introduce a new `.bicepparam` function named `readExternalInput`.
+1. Introduce a new `.bicepparam` function named `externalInput`.
 
 1. Introduce a "externalInputs" field to the JSON parameters file.
 
@@ -31,15 +31,15 @@ The challenge that this spec sets out to solve is that there is no way to (a) ex
 
 1. Give the Deployment Engine some limited abilities to evaluate expressions inside parameters.
 
-### readExternalInput Function
+### externalInput Function
 
 When a tool like Azure CLI invokes Bicep programatically to submit a deployment, there are 2 distinct steps - the compilation from `.bicepparam` to `.json`, and the submitting of the Deployment to the API. We've been able to work around this with features like `readEnvironmentVariable` and inline parameters, but the API between tool and Bicep CLI is clunky and can lead to problems.
 
 The challenge that this spec sets out to solve is that there is no way to (a) explicitly request input from an external tool and (b) express unresolved data and expressions purely within a parameter file. This creates a problem for Microsoft-internal tooling in particular, where it's necessary to separate out the compilation and deployment.
 
-The proposed `readExternalInput` function has the following structure:
+The proposed `externalInput` function has the following structure:
 ```
-readExternalInput(<input_name>[, <input_config>])
+externalInput(<input_name>[, <input_config>])
 ```
 
 With the following arguments:
@@ -52,12 +52,12 @@ Both arguments must be compile-time constants.
 
 Reading an env var:
 ```bicep
-var myEnvVar = readExternalInput('sys.envVar', 'MY_ENV_VAR')
+var myEnvVar = externalInput('sys.envVar', 'MY_ENV_VAR')
 ```
 
 Reading an CLI argument:
 ```bicep
-var myCliArg = readExternalInput('sys.cliArgument', 'cli-arg')
+var myCliArg = externalInput('sys.cliArgument', 'cli-arg')
 ```
 
 ### Supporting inputs in JSON parameters file
@@ -141,15 +141,15 @@ Currently, individual parameters can either contain "value" (for a concrete valu
 }
 ```
 
-I believe this functionality could also be extended to access runtime information like `environment()` or `tenant()`, which are popular asks. However, for this proposal, I'm only planning on implementing the "built-in" expression functions as well as `readExternalInput`.
+I believe this functionality could also be extended to access runtime information like `environment()` or `tenant()`, which are popular asks. However, for this proposal, I'm only planning on implementing the "built-in" expression functions as well as `externalInput`.
 
 ### Putting it all together
 
-1. User asks tool to deploy a `.bicepparam` file containing `readExternalInput` functions.
+1. User asks tool to deploy a `.bicepparam` file containing `externalInput` functions.
 1. Bicep converts the `.bicepparam` file to JSON, retaining the configured inputs in the "externalInputs" section.
 1. The tool reads the "externalInputs" file and processes all of the requested inputs - providing errors if it doen't know how to reolve them.
 1. The tool builds the "externalInputValues" portion of the requet containing the resolved values of the inputs. It sends the template, parameters, externalInputs and externalInputValues property to the Deployments API.
-1. The Deployments API evaluates language expressions for each parameter with an "expression" property defined, using the externalInputValues property to handle the `readExternalInput` function evaluation.
+1. The Deployments API evaluates language expressions for each parameter with an "expression" property defined, using the externalInputValues property to handle the `externalInput` function evaluation.
 1. Deployments API removes the "expression" property and sets the "value" field for resolved parameters.
 
 ## Examples
@@ -159,7 +159,7 @@ Bicep authoring:
 ```bicep
 using 'main.bicep'
 
-param foo = readExternalInput('sys.envVar', 'MY_FOO_VAR')
+param foo = externalInput('sys.envVar', 'MY_FOO_VAR')
 ```
 
 Generated JSON parameters file:
