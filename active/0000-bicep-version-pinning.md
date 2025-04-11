@@ -48,48 +48,6 @@ The following example shows the proposed `version` property syntax to be added i
 
 The appropriate Bicep version will be determined by using the closest `bicepconfig.json` file to the Bicep file being compiled, merged with the default configuration.
 
-#### Cross-module compilation
-
-Each module can be constrained to a different version requirement specified in the closest `bicepconfig.json` to it. This will be beneficial for version ranges, allowing a module author to set a minimum version for compatibility if the module uses features introduced after said version. 
-
-Having said that, compilation of modules with conflicting version requirements should fail – if a module's Bicep version constraint does not match the installed Bicep binary, an error should be surfaced within the module and wherever the module is referenced. The following example illustrates this concept:
-
----------------
-**Given the installed version is v0.31.92:**
-
-_bicepconfig.json_
-```json5
-{
-    "bicep": {
-        "version": "0.31.92"
-    }
-}
-```
-
-_modules/bicepconfig.json_
-```json5
-{
-    "bicep": {
-        "version": "0.15.0"
-    }
-}
-```
-
-_modules/mod.bicep_
-```bicep
-resource otherResource 'Test.RP' = {} // <-- Bicep version "0.31.92" was used for compilation, but version "0.15.0" is required in configuration file (BCPxxx)
-```
-
-_main.bicep_
-```bicep
-module mod 'modules/mod.bicep' = { // <--  The referenced module has errors.bicep (BCP104)
-    name: 'mod'
-}
-```
-
-
-No specific change to the codebase is expected to achieve this, as Bicep already handles this today (i.e. if there are errors in a referenced module, an error is surfaced on all the references).
-
 ----------------
 
 ### Version constraint syntax
@@ -133,7 +91,7 @@ Examples:
 - `^1` - equivalent to `>=1.0.0 <2.0.0`
 
 
-### Update Bicep CLI 
+### Update Bicep compiler 
 #### Version check during compilation
 The Bicep CLI should be updated to check for the version constraint in the configuration.
 
@@ -142,6 +100,24 @@ If a user runs Bicep CLI directly to build a bicep file, we will try to resolve 
 - If the resolved version constraint does not match the locally-installed Bicep version, the compilation should fail with a clear message indicating the constraint violation.
 - If no version constraint is specified anywhere in the `bicepconfig.json` resolution chain, the compilation should fallback to using the currently installed version.
 
+#### Linter rules
+- Since we've chosen to use bicepconfig.json for version constraints, the current expectation is consistent resolution logic (e.g., the closest `bicepconfig.json` to a Bicep file is used). 
+- This also means users may specify different version constraints in different `bicepconfig.json` files. 
+- External tools do not understand how Bicep source files are grouped, therefore they can't detect version constraints in referenced modules. 
+- External tools can parse the version constraint for the entrypoint Bicep file, but conflicts won't be detected in referenced modules until the installed Bicep CLI is invoked.
+
+- In order to help the users prevent such runtime issues, we will two linter rules:
+1. **Incompatible Module Constraints:**
+    - If the version constraints specified in `bicepconfig.json` files across modules cannot be combined into a single valid version range (i.e. disjoint ranges), emit an error. For example:
+    - Module A requires `>=0.31.0 <0.32.0`.
+    - Module B requires `>=0.15.0 <0.16.0`.
+    - These constraints cannot be satisfied simultaneously, so the emit an error.
+
+2. **Looser Constraints in a parent module:**
+   - If the version constraint for the bicep file being edited is looser than any of the referenced modules' constraints, emit an error. For example:
+   - Entrypoint file requires `>=0.15.0`.
+   - Referenced module requires `<0.17.0`.
+   - Because the external tool only looks at the entrypoint file, it may download a version that is incompatible with a referenced modules (e.g. version `0.21.0` in the example).
 ----------------
 
 ### VSCode experience
@@ -161,13 +137,13 @@ We will need to clearly document this behavior in which the pinning is not stric
     - For example, given the version constraint `>=0.31.0 <0.32.0` and the available Bicep release tags `[0.21.14, 0.31.1, 0.31.92, 0.32.45]`, AzCLI would download version `0.31.92`.
 - If no version constraints are found, AzCLI should default to using locally installed version (or downloading the latest version if no Bicep is not installed locally).
 
-### Note about `use_binary_from_path` config value
+#### Note about `use_binary_from_path` config value
 When `use_binary_from_path` AzCLI config is set to `true`, or `if_found_in_ci`, AzCLI will invoke the bicep binary found in the PATH environment variable. With version pinning, the version in PATH would not necessarily correspond to the constraint resolved from the `bicepconfig.json`. 
 
 We should therefore set `use_binary_from_path` to `false` if a version constraint is found (this is similar to the behavior when a user runs `az bicep install --version` to install a specific version of Bicep. See more details on [this PR](https://github.com/Azure/azure-cli/pull/25541)).
 
-### Version syntax parsing
-Since there is no official standard for the syntax of semver ranges, different tools/libraries that implement the npm-like syntax often have subtle or major differences. As a result, we will implement our own parser in Bicep so that we can better control what is supported & not supported. We can then utilize Copilot to help translate the parsing logic to Python in AzCLI, and to Go in Ev2 CLI.
+#### Version syntax parsing
+Since there is no official standard for the syntax of semver ranges, different tools/libraries that implement the npm-like syntax often have subtle or major differences. As a result, we will implement our own parser in Bicep so that we can better control what is supported & not supported. We can then utilize Copilot to help translate the parsing logic to other languages, i.e. Python for AzCLI.
 
 ## Drawbacks
 - **Degraded visibility into registry module version constraints:** When inspecting published module source bicep file, it wouldn't be immediately clear what version was used to compile the module just by looking at the bicep file. This is because version information would be codified in the `bicepconfig.json` which is not published with the sources. However, the user can still discern the version used with the aid of the VSCode extension; the user can navigate to the compiled JSON which contains metadata about which version was used to compile the module. 
@@ -293,5 +269,5 @@ However, we should impose the following restrictions:
 
     
 ## Out of scope
-- Making this work in AzPwsh would be nice to have as the owning team is now more open for us to make changes, but would involve significant work to make it at par with AzCLI. This can be considered future enhancement.
-- There were concerns about how this would work with bicepconfig.json resolution mechanism. Today, the closest bicepconfig.json file is used to resolve configurations relative to the bicep/bicepparam file being compiled. Since there exists no merge process for the bicepconfig.json files, this could be problematic in the cases where users want to have repo-wide settings honored even with child folders containing their own bicepconfig.json files. This limitation, however, has existed already, and hence orthogonal to this proposal; we could adopt this proposal without necessarily solving the bicepconfig.json limitation. 
+1. Making this work in AzPwsh would be nice to have as the owning team is now more open for us to make changes, but would involve significant work to make it at par with AzCLI. This can be considered future enhancement.
+2. There were concerns about how this would work with bicepconfig.json resolution mechanism. Today, the closest bicepconfig.json file is used to resolve configurations relative to the bicep/bicepparam file being compiled. Since there exists no merge process for the bicepconfig.json files, this could be problematic in the cases where users want to have repo-wide settings honored even with child folders containing their own bicepconfig.json files. This limitation, however, has existed already, and hence orthogonal to this proposal; we could adopt this proposal without necessarily solving the bicepconfig.json limitation. 
