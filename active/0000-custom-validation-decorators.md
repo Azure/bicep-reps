@@ -272,9 +272,12 @@ param p string
 
 ## Drawbacks
 
-User-defined functions can only consist of a single expression, and validator functions will need to use at least one
+* User-defined functions can only consist of a single expression, and validator functions will need to use at least one
 ternary expression unless they wish to always succeed or always fail. Some form of `switch` or `match` expression would
 make this feature easier to use.
+* Unlike `@min/maxValue()`, `@min/maxLength()`, and `@allowed()`, we wouldn't be able to use a custom validator to
+refine the type of a parameter. In this sense, custom validators are more like the proposed `@pattern()` validator than
+they are like existing validators.
 
 ## Overlap with other features
 
