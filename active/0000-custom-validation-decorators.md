@@ -75,7 +75,7 @@ inferences would be a difficult task that could never be declared finished.
 
 ### Server side changes
 
-ARM will add a new constraint named `userDefinedConstraint` whose value is an object with three properties:
+ARM will add a new constraint named `userDefinedConstraints` whose value is an array of objects with three properties:
 1. *namespace* -  the function namespace (**required**)
 2. *name* - the function within the specified namespace (**required**)
 3. *additionalArguments* - an array of additional arguments to pass to the specified function
@@ -115,6 +115,9 @@ writing, this means that the custom validator would be usable in language versio
 * 2.0
 * 2.1-experimental
 * 2.2-experimental
+
+While under development, the constraint will also require the `UserDefinedConstraints` template language feature. This
+feature will only be added to language versions `2.1-experimental` and `2.2-experimental`.
 
 #### Future evolution
 
@@ -166,11 +169,13 @@ param p string
   "parameters": {
     "p": {
       "type": "string",
-      "userDefinedConstraint": {
-        "namespace": "__bicep",
-        "name": "myLocalValidator",
-        "additionalArguments": [10]
-      }
+      "userDefinedConstraints": [
+        {
+          "namespace": "__bicep",
+          "name": "myLocalValidator",
+          "additionalArguments": [10]
+        }
+      ]
     }
   },
   "resources": {}
@@ -213,10 +218,12 @@ param p string
   "parameters": {
     "p": {
       "type": "string",
-      "userDefinedConstraint": {
-        "namespace": "__bicep",
-        "name": "anImportedValidator"
-      }
+      "userDefinedConstraints": [
+        {
+          "namespace": "__bicep",
+          "name": "anImportedValidator"
+        }
+      ]
     }
   },
   "resources": {}
@@ -260,10 +267,12 @@ param p string
   "parameters": {
     "p": {
       "type": "string",
-      "userDefinedConstraint": {
-        "namespace": "_1",
-        "name": "anImportedValidator"
-      }
+      "userDefinedConstraints": [
+        {
+          "namespace": "_1",
+          "name": "anImportedValidator"
+        }
+      ]
     }
   },
   "resources": {}
