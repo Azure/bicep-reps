@@ -10,14 +10,15 @@ Bicep Issue Number(s): 2922
 
 ## Summary
 
-Template authors should be able to define custom decorators using Bicep's user-defined function syntax. As a first
-application of this affordance, template authors should be able to declare custom validation decorators that may be
-applied anywhere a type decorator such as `@minValue(...)` is accepted. The identifier between the `@` and `(`
-characters MUST refer to a user-defined function that accepts at least one argument corresponding to the targeted type
-and returns a value of type `string?`.
+Template authors should be able to define custom decorators using Bicep's lambda syntax. Bicep will add a `@validate()`
+decorator function that may be applied anywhere a type decorator such as `@minValue(...)` is accepted. The decorator
+will accept a single lambda argument. This lambda must itself accept a single argument whose type is compatible with the
+target of the decorator and must return a boolean value. A second variant of this function will accept an even number of
+arguments, where each odd-numbered argument is a lambda as described above, and each even-numbered argument is a string
+to use as the error message if the immediately preceding lambda returns `false`.
 
-At deploy time, the ARM engine will invoke the user-defined function with the value to be validated along with any
-specified additional arguments and inspect the function's return value to determine whether the validation passed.
+At deploy time, the ARM engine will invoke the lambda with the value to be validated. A return value of `true` indicates
+that the validation passed, and a return value of `false` indicates that the validation failed.
 
 ## Terms and definitions
 
@@ -35,60 +36,83 @@ boundary within their deployment.
 
 ## Detailed design
 
-Any user-defined function that is targeted by the `@validator()` decorator MAY be used by a template author as a type
-decorator to enforce a custom validation gate.
+A `@validate()` decorator MAY be used by a template author as a type decorator to enforce a custom validation gate.
 
 ### Client side changes
 
-A new decorator function named `validator` will be added to the `sys` namespace. Like `export`, this new decorator
-function will be consumed by the compiler rather than being emitted in the compiled template. The decorator may only
-target user-defined functions that:
-
-* Accept one or more arguments, and
-* Have a return type of `string?`
-
-Any user-defined function function targeted by the new decorator will be assigned the `FunctionFlags.TypeDecorator`
-flag and loaded as both a function and a decorator. The decorator's attachable type will be the declared type of the
+A new decorator function named `validate` will be added to the `sys` namespace and assigned the
+`FunctionFlags.TypeDecorator` flag. The `validate` function has one required argument and one optional argument. The
+first argument is a lambda of type `T => bool`, where `T` is the declared type of the statement targeted by the
+decorator. The second argument is a string that contains the error message that will be emitted if the validation lambda
+returns `false`. The function will accept any number of addtional `T => bool, string` argument pairs. The decorator's attachable type will be the declared type of the
 function's first argument. Any additional arguments must be supplied when the decorator is used.
 
 ```bicep
-@validator()
-func mustContain(toValidate string, requiredSubstring string) string? => contains(toValidate, requiredSubstring) ? null : '${toValidate} does not contain ${requiredSubstring}'
-
-@mustContain('hello')      // <-- no error
+// usage with error message omitted
+@validate(x => contains(x, 'foo'))
 param foo string
 
-
-@mustContain('hello')      // <-- error because param type is not assignable to mustContain's first arg type
+// usage with error message supplied
+@validate(x => contains(x, 'foo'), 'bar must contain the substring \'foo\'')
 param bar int
 
-@mustContain()             // <-- error because mustContain requires a second argument
+// usage with multiple validation lambdas
+@validate(
+  x => startsWith(x, 'fo'), 'baz must start with the letters \'fo\'',
+  x => endsWith(x, 'd'), 'baz must end with the letter \'d\'',
+  x => length(x) == 4, 'baz be exactly 4 letters')
 param baz string
 ```
 
-When the compiler encounters a decorator that is a user-defined function, it will generate the user-defined constraint
-ARM JSON syntax described in the next section.
+When the compiler encounters the `validate` decorator, it will generate the `"validate"` constraint ARM JSON syntax
+described in the next section.
 
 The Bicep compiler SHOULD NOT make any attempt to refine or narrow a type based on the user-defined validation
-decorator. User-defined functions are too flexible to allow refining inferences to be drawn, and combining such
-inferences would be a difficult task that could never be declared finished.
+decorator. Lambdas are too flexible to allow refining inferences to be drawn, and combining such inferences would be a
+difficult task that could never be declared finished.
+
+#### Applicability
+
+As a type decorator, `@validate()` may target the following kinds of statements:
+
+1. `type` statements
+1. `param` statements
+1. `output` statements
+1. `var` statements with a declared type
+1. Type property declarations within any of the above
 
 ### Server side changes
 
-ARM will add a new constraint named `userDefinedConstraints` whose value is an array of objects with three properties:
-1. *namespace* -  the function namespace (**required**)
-2. *name* - the function within the specified namespace (**required**)
-3. *additionalArguments* - an array of additional arguments to pass to the specified function
-If the namespace is not found or contains no function with the provided name, then a `TemplateValidationException` will
-be thrown.
+ARM will add a new constraint named `validate` whose value is an array. This array MUST have at least one argument, and
+MAY have any even, non-zero number of arguments.
 
-The constraint validation engine will invoke the designated function, passing the value being validated the first
-function argument, followed by any specified additional arguments. The engine will inspect the value returned by the
-function invocation to determine whether the constraint was violated. If the returned value is `null`, the validation
-passes and the engine reports no violation. If the returned value is a string, a constraint violation with the specified
-error message is raised (i.e., the deployment will fail with an error code of "InvalidTemplate" and the supplied
-message). If the return value is not a string or `null`, then an `TemplateValidationException` with a localizable
-message indicating that a custom validator returned an invalid value will be thrown.
+Each odd numbered argument MUST be a string containing a function expression. The function invoked must be `"lambda"`.
+The function MUST be called with exactly two arguments:
+1. A string declaring the name of the single lambda variable corresponding to the value being validated.
+1. An evaluable expression.
+
+Each even-numbered argument MUST be a non-evaluable string.
+
+If the function invoked with an invalid number of arguments or arguments that do not match the descriptions above, then
+a `TemplateValidationException` will be thrown.
+
+The constraint validation engine will invoke each supplied lambda, passing the value being validated the single function
+argument. The engine will inspect the value returned by the invocation to determine whether the constraint was violated.
+If the returned value is `true`, the validation passes and the engine reports no violation. If the returned value is
+`false`, a constraint violation will be raised (i.e., the deployment will fail with an error code of "InvalidTemplate").
+If the return value is not a boolean, then an `TemplateValidationException` with a localizable message indicating that a
+custom validator returned an invalid value will be thrown.
+
+#### Constraint violation message
+
+For a value with a template author-supplied error string, the message will be, "The provided value for the
+`value type` `value path` is not valid. The value was rejected by a custom validation predicate with the following
+message: '`message`.'".
+
+For a value with no template author-supplied error string, the message will instead be, "The provided value for the
+`value type` `value path` is not valid. The value was rejected by a custom validation predicate."
+
+Both message variants will be localized.
 
 #### Expected engine behavior
 
@@ -129,11 +153,9 @@ value has a token type of `Array`, the v2 contract will be used.
 
 ### Examples
 
-- Using a locally defined validator
+- Applied to a parameter
 ```bicep
-func myLocalValidator(arg string, extraArg int) string? => null
-
-@myLocalValidator(10)
+@validate(x => true)
 param p string
 ```
 
@@ -142,39 +164,11 @@ param p string
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "languageVersion": "2.0",
-  "functions": [
-    {
-      "namespace": "__bicep",
-      "members": {
-        "myLocalValidator": {
-          "parameters": [
-            {
-              "name": "arg",
-              "type": "string"
-            },
-            {
-              "name": "extraArg",
-              "type": "int"
-            }
-          ],
-          "output": {
-            "type": "string",
-            "nullable": true,
-            "value": null
-          }
-        }
-      }
-    }
-  ],
   "parameters": {
     "p": {
       "type": "string",
-      "userDefinedConstraints": [
-        {
-          "namespace": "__bicep",
-          "name": "myLocalValidator",
-          "additionalArguments": [10]
-        }
+      "validate": [
+        "[lambda('x', true())]"
       ]
     }
   },
@@ -182,12 +176,12 @@ param p string
 }
 ```
 
-- Using an imported validator
+- Applied to a type
 ```bicep
-import { anImportedValidator } from 'shared.bicep'
+@validate(x => contains(x, 'x'))
+type myType = string
 
-@anImportedValidator()
-param p string
+param p myType
 ```
 
 ```json
@@ -195,84 +189,17 @@ param p string
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "languageVersion": "2.0",
-  "functions": [
-    {
-      "namespace": "__bicep",
-      "members": {
-        "anImportedValidator": {
-          "parameters": [
-            {
-              "name": "arg",
-              "type": "string"
-            }
-          ],
-          "output": {
-            "type": "string",
-            "nullable": true,
-            "value": null
-          }
-        }
-      }
-    }
-  ],
-  "parameters": {
-    "p": {
+  "definitions": {
+    "myType": {
       "type": "string",
-      "userDefinedConstraints": [
-        {
-          "namespace": "__bicep",
-          "name": "anImportedValidator"
-        }
+      "validate": [
+        "[lambda('x', contains(lambdaVariables('x'), 'x'))]"
       ]
     }
   },
-  "resources": {}
-}
-```
-
-- Using a wildcard-imported validator
-```bicep
-import * as shared from 'shared.bicep'
-
-@shared.anImportedValidator()
-param p string
-```
-
-```json
-{
-  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-  "contentVersion": "1.0.0.0",
-  "languageVersion": "2.0",
-  "functions": [
-    {
-      "namespace": "_1",
-      "members": {
-        "anImportedValidator": {
-          "parameters": [
-            {
-              "name": "arg",
-              "type": "string"
-            }
-          ],
-          "output": {
-            "type": "object",
-            "value": {
-              "kind": "success"
-            }
-          }
-        }
-      }
-    }
-  ],
   "parameters": {
     "p": {
-      "type": "string",
-      "userDefinedConstraints": [
-        {
-          "namespace": "_1",
-          "name": "anImportedValidator"
-        }
-      ]
+      "$ref": "#/definitions/myType"
     }
   },
   "resources": {}
@@ -281,9 +208,8 @@ param p string
 
 ## Drawbacks
 
-* User-defined functions can only consist of a single expression, and validator functions will need to use at least one
-ternary expression unless they wish to always succeed or always fail. Some form of `switch` or `match` expression would
-make this feature easier to use.
+* Custom validation constraints cannot be directly exported and imported, although types with custom validators attached
+may be.
 * Unlike `@min/maxValue()`, `@min/maxLength()`, and `@allowed()`, we wouldn't be able to use a custom validator to
 refine the type of a parameter. In this sense, custom validators are more like the proposed `@pattern()` validator than
 they are like existing validators.
