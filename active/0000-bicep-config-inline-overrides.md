@@ -10,15 +10,12 @@ Start Date: 2025-12-08
 
 Introduce ability to override bicepconfig settings inline for the Bicep CLI commands
 
-## Terms and definitions
-- **Ev2**: Microsoft-internal deployment platform
-
 ## Motivation
 
-Internally, we're working on enhancing external input experience by introducing a plugin-based protocol to help shift errors left and provide users with richer type validation when authoring and when validating their Ev2 deployment artifacts.
+Internally, we're working on enhancing external input experience by introducing a plugin-based protocol to help shift errors left and provide users with richer type validation when authoring and when validating their Microsoft-internal deployment artifacts.
 There are two distinct scenarios which we need to support:
 1. Validation during authoring in VSCode
-2. Validation when invoking Ev2 SDK/cmdlets which will internally invoke the Bicep CLI to compile bicep artifacts
+2. Validation when invoking SDK/cmdlets which will internally invoke the Bicep CLI to compile bicep artifacts
 
 For scenario (1), users will provide validation parameters in their bicepconfig.json that the plugin requires to successfully resolve an external input,
 ```json5
@@ -40,7 +37,7 @@ For scenario (1), users will provide validation parameters in their bicepconfig.
     }
 }
 ```
-For scenario (2), users will provide the validation parameters via the Ev2 SDK/cmdlet, like so:
+For scenario (2), users will provide the validation parameters via the SDK/cmdlet, like so:
 ```ps1
 Test-AzureArtifacts `
     -ServiceGroupRoot "/path/to/SGR"
@@ -54,7 +51,7 @@ The implication here is that in scenario (2), the parameters provided via the cm
 
 Additionally, there are parameters such as `ConfigurationOverrides` that only make sense to be provided via the cmdlet/SDK and not on the bicepconfig.json, since they are typically provided in a CI pipeline context. Such parameters should similarly be taken into account when performing external input validation.
 
-This spec aims to introduce an override mechanism for bicepconfig.json, and by so doing, the Ev2 cmdlet/SDK would be able to override the `externalInputResolverConfig` parameters when invoking the Bicep CLI with the parameters provided by the user to the cmdlet/SDK.
+This spec aims to introduce an override mechanism for bicepconfig.json, and by so doing, the cmdlet/SDK would be able to override the `externalInputResolverConfig` parameters when invoking the Bicep CLI with the parameters provided by the user to the cmdlet/SDK.
 
 ## Detailed design
 
@@ -238,6 +235,6 @@ The usual experimental feature flagging (via bicepconfig) doesn't seem applicabl
 
 ## Unresolved questions
 
-1. Should we implement the more complex JSON-PATCH (RFC 6902) or directive-based override syntax _initially_ or as follow-up? These would likely take time to iron out the design and potentially delay the Ev2 authoring design
+1. Should we implement the more complex JSON-PATCH (RFC 6902) or directive-based override syntax _initially_ or as follow-up? These would likely take time to iron out the design and potentially delay the authoring design
 2. How does this feature interact with the planned feature ([#5013](https://github.com/Azure/bicep/issues/5013)) for bicepconfig file path overrides
     - What is the current state of the existing feature request?
