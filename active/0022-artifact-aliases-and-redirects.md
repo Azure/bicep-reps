@@ -20,7 +20,7 @@ This proposal introduces:
 - `local`, a first-class artifact scheme for resolving artifacts from the local filesystem.
 - `oci`, the canonical scheme for registry-backed artifacts.
 
-The primary scenarios are a consistent artifact-reference experience across modules and extensions and local artifact development in monorepos. This proposal preserves existing `br` references and `moduleAliases` configuration without warnings or required migration.
+The primary scenarios are a consistent artifact-reference experience across modules and extensions and local artifact development in monorepos. This proposal preserves existing `br` references, `moduleAliases` configuration, and `moduleAliasesMock` behavior without warnings or required migration.
 
 ## Terms and definitions
 
@@ -68,6 +68,26 @@ br:mcr.microsoft.com/bicep/avm/res/storage/storage-account:0.32.1
 ```
 
 This proposal continues to support this configuration and reference syntax without warnings. It builds on the existing alias experience while making artifact references consistent for modules and extensions and adding local artifact support.
+
+### Existing module alias mock experience
+
+The existing `moduleAliasesMock` configuration, introduced by [Azure/bicep#19452](https://github.com/Azure/bicep/pull/19452), redirects a `br/<alias>:` module reference to a filesystem root while preserving the reference in Bicep source. For example:
+
+```json
+{
+  "moduleAliasesMock": {
+    "br": {
+      "company": {
+        "mapToFilePath": "./modules"
+      }
+    }
+  }
+}
+```
+
+The reference `br/company:network/vnet:1.0.0` resolves to `./modules/network/vnet.bicep` relative to the configuration file. The repository path becomes the local file path, while the tag or digest does not participate in the path. This behavior supports local testing of registry modules but applies only to `br/<alias>:` module references and always follows the fixed `<repository>.bicep` layout.
+
+`artifacts.redirects` generalizes this scenario to fully qualified and aliased modules, extensions, Template Specs, and data files, with explicit target paths and optional captures. Existing `moduleAliasesMock` configurations remain supported as described under **Incremental adoption from `br` to `oci`**.
 
 For monorepos, [Azure/bicep#19883](https://github.com/Azure/bicep/issues/19883) describes how relative references to shared artifacts become brittle when files move, while publishing every change to a registry inhibits the end-to-end development workflow that a monorepo is intended to provide. Local artifact resolution gives modules, extensions, and data files stable artifact-style references without requiring a publish step. This is the local file registry scenario from the issue; the `local` scheme in this proposal resolves files directly and does not operate an OCI registry.
 
@@ -120,7 +140,7 @@ Developers can redirect a published artifact reference to an unpublished local m
 
 ### Maintain backward compatibility
 
-Existing `br` references and `moduleAliases` configuration continue to work without modification or warnings under this proposal. Projects can adopt `oci` and `artifacts.aliases` incrementally without being required to migrate existing source or configuration.
+Existing `br` references, `moduleAliases` configuration, and `moduleAliasesMock` configuration continue to work without modification or warnings under this proposal. Projects can adopt `oci`, `artifacts.aliases`, and `artifacts.redirects` incrementally without being required to migrate existing source or configuration.
 
 ### Non-goals
 
@@ -535,8 +555,8 @@ Restricting targets to local files prevents redirect chains and cycles. Redirect
 
 A redirect key can contain named captures:
 
-- `{name}` captures exactly one artifact-reference segment and does not cross `/`, `:`, or `::` delimiters.
-- `{...name}` captures one or more `/`-separated segments and does not cross `:` or `::` delimiters. A key can contain at most one multi-segment capture.
+- `{name}` captures exactly one artifact-reference segment and does not cross `/`, `:`, `::`, or `@` delimiters.
+- `{...name}` captures one or more `/`-separated segments and does not cross `:`, `::`, or `@` delimiters. A key can contain at most one multi-segment capture.
 
 Capture names must start with a letter or underscore, contain only letters, digits, and underscores, and be unique within a key. A target substitutes a captured value with `{name}`, regardless of whether the key declared it as `{name}` or `{...name}`. A target can use each capture, use a capture more than once, or omit it. Every placeholder used by the target must be declared by the key.
 
@@ -666,14 +686,17 @@ Redirects can target either the spelling used in source or the canonical artifac
 
 1. An exact match against the source spelling.
 2. A capture pattern against the source spelling, choosing the pattern with the most literal characters.
-3. If the source is an alias, expand it without restoring the artifact.
-4. An exact match against the canonical, fully expanded identity.
-5. A capture pattern against the canonical identity, choosing the pattern with the most literal characters.
-6. No redirect.
+3. If the source is a `br/<alias>:` reference with a matching `moduleAliasesMock.br` entry, apply the existing module alias mock.
+4. If the source is an alias, expand it without restoring the artifact.
+5. An exact match against the canonical, fully expanded identity.
+6. A capture pattern against the canonical identity, choosing the pattern with the most literal characters.
+7. No redirect.
 
 For registry artifacts, the canonical identity uses the `oci:` spelling even when the source used `br`, `br/public`, or an alias. Source-spelling matches take precedence so a project can override one intentional spelling without affecting another alias that expands to the same location. Canonical matches allow one redirect to cover legacy, fully qualified, and alias references that identify the same artifact.
 
 For Template Specs, the canonical identity uses the fully qualified `ts:` spelling even when the source uses `ts/<alias>:` or a new artifact alias. For local artifacts, the canonical identity is the normalized local path. A source-spelling redirect remains preferable for portable local references because an absolute normalized path is machine-specific.
+
+A source-spelling entry in `artifacts.redirects` can therefore override a broader `moduleAliasesMock` mapping intentionally. When no source-spelling redirect matches, `moduleAliasesMock` retains its existing behavior and stops further alias expansion or canonical redirect matching for that reference.
 
 If equally specific capture patterns match the same reference in the same matching phase, configuration validation fails rather than depending on declaration order.
 
@@ -726,6 +749,50 @@ Redirected content bypasses the registry restore cache and must never be stored 
 This proposal makes `oci` the canonical scheme for registry-backed artifacts. The name `br` was originally inspired by Terraform Registry terminology, but it is too generic as Bicep expands beyond one registry model. It does not identify whether an artifact comes from MAR, a private Azure Container Registry, or a locally hosted registry.
 
 `oci` identifies the underlying artifact format and distribution protocol. The same scheme therefore applies consistently to MAR, private registries, locally hosted OCI registries, modules, extensions, and future OCI artifact types. The `local` scheme remains distinct because it resolves files directly and is not a registry.
+
+#### Compatibility with `moduleAliasesMock`
+
+Existing `moduleAliasesMock.br` entries continue to apply only to `br/<alias>:` module references. Their current mapping behavior is unchanged: `mapToFilePath` establishes a filesystem root, the repository portion of the reference maps to a `.bicep` file below that root, and the tag or digest is omitted from the local path. Relative roots remain relative to the declaring configuration file, and existing absolute roots remain valid.
+
+New configurations should use `artifacts.redirects` when they need behavior beyond this compatibility surface. For example, the legacy mapping:
+
+```json
+{
+  "moduleAliasesMock": {
+    "br": {
+      "company": {
+        "mapToFilePath": "./modules"
+      }
+    }
+  }
+}
+```
+
+can be expressed for tagged references as:
+
+```json
+{
+  "artifacts": {
+    "redirects": {
+      "br/company:{...path}:{tag}": "./modules/{path}.bicep"
+    }
+  }
+}
+```
+
+and for digest references as:
+
+```json
+{
+  "artifacts": {
+    "redirects": {
+      "br/company:{...path}@{algorithm}:{digest}": "./modules/{path}.bicep"
+    }
+  }
+}
+```
+
+The two mechanisms are not reinterpreted as identical configuration. In particular, `moduleAliasesMock` retains its existing support for absolute roots and its existing diagnostics. Merely adopting a Bicep version that implements this proposal does not cause an existing module alias mock to emit the new `artifact-redirect` diagnostic. That diagnostic applies when `artifacts.redirects` selects the local file.
 
 #### Public registry alias
 
@@ -864,8 +931,9 @@ The configuration schema and compiler report this as an invalid predefined-alias
 - Existing fully qualified `br:` references continue to resolve unchanged.
 - Existing `br/<alias>:` references continue to use `moduleAliases.br` configuration.
 - Existing `ts/<alias>:` references continue to use `moduleAliases.ts` configuration.
+- Existing `moduleAliasesMock.br` entries continue to mock `br/<alias>:` module references with their current path and diagnostic behavior.
 - `artifacts.aliases` entries are never used to resolve `br/<alias>:` or `ts/<alias>:` references.
-- Existing `moduleAliases` configuration remains supported.
+- Existing `moduleAliases` and `moduleAliasesMock` configuration remains supported.
 - Old and new reference forms can coexist in the same project.
 - Adopting a Bicep version that supports this proposal does not require source or configuration migration.
 - This proposal does not deprecate `br` references or `moduleAliases` and does not emit migration or deprecation warnings for either form.
@@ -890,6 +958,7 @@ The Bicep CLI, compiler, language server, configuration schema, and artifact dis
 - Recognize `oci:` and `local:` schemes.
 - Resolve and validate typed `artifacts.aliases` entries.
 - Keep `moduleAliases.br`, `moduleAliases.ts`, and `artifacts.aliases` resolution independent, without cross-map fallback or coexistence warnings.
+- Preserve `moduleAliasesMock` behavior and apply it after source-spelling redirects but before legacy alias expansion.
 - Provide the predefined `mar` and `avm` aliases, allow their OCI locations to be overridden, and reject overrides that change their type.
 - Apply `artifacts.redirects` before loading an artifact.
 - Match redirects against source spelling before canonical identity, without restoring the artifact during alias expansion.
@@ -902,7 +971,7 @@ The Bicep CLI, compiler, language server, configuration schema, and artifact dis
 - Produce diagnostics for invalid aliases, ambiguous redirects, invalid capture patterns, invalid local targets, and missing local artifacts.
 - Ensure editor navigation, completion, restore, build, and publish-related experiences understand the new reference forms where applicable.
 
-Resolution follows one client-side pipeline: parse the source reference, try source-spelling redirects, expand an alias when present, canonicalize through the scheme's existing artifact handler, try canonical-identity redirects, and then restore or load the selected artifact. The compiler and language server use the same resolver so build, diagnostics, completion, and navigation do not disagree about the selected artifact.
+Resolution follows one client-side pipeline: parse the source reference, try source-spelling redirects, apply a matching legacy module alias mock, expand an alias when present, canonicalize through the scheme's existing artifact handler, try canonical-identity redirects, and then restore or load the selected artifact. The compiler and language server use the same resolver so build, diagnostics, completion, and navigation do not disagree about the selected artifact.
 
 ### Server side changes
 
@@ -936,7 +1005,7 @@ The Bicep source does not change between production and development.
 
 ## Tradeoffs
 
-- Supporting both legacy and new artifact-reference models expands the language and configuration surface area. Bicep must maintain both models because this proposal does not require migration or deprecate the existing forms.
+- Supporting both legacy and new artifact-reference models expands the language and configuration surface area. Bicep must maintain `moduleAliases`, `moduleAliasesMock`, and the new model because this proposal does not require migration or deprecate the existing forms.
 - As with existing `moduleAliases`, artifact aliases trade source-level location visibility for shorter references and location changes without source edits. This proposal extends that existing indirection to additional artifact types. Predefined `mar` and `avm` aliases can also resolve through a configured OCI mirror, although their artifact type cannot be changed.
 - Local artifacts and redirects improve development workflows at the cost of registry-backed immutability and reproducibility. Redirect disclosure, direct dependency tracking, package validation, and exclusion from the remote cache reduce the risk of mistaking local content for a restored artifact.
 
@@ -970,7 +1039,7 @@ Consumers can replace artifact references with relative paths while developing. 
 
 ## Rollout plan
 
-This additive client-side feature does not require an experimental feature flag or backend rollout. It will ship in a regular Bicep release after implementation, documentation, and automated tests are complete. Tests will cover parsing and configuration validation, artifact resolution, redirects and captures, cross-platform local paths, language-server behavior, and backward compatibility for existing `br`, `ts`, and `moduleAliases` references. Post-release bugs will be handled through the normal Bicep issue and servicing process.
+This additive client-side feature does not require an experimental feature flag or backend rollout. It will ship in a regular Bicep release after implementation, documentation, and automated tests are complete. Tests will cover parsing and configuration validation, artifact resolution, redirects and captures, cross-platform local paths, language-server behavior, and backward compatibility for existing `br`, `ts`, `moduleAliases`, and `moduleAliasesMock` references. Module alias mock compatibility tests will include tags, digests, nested repository paths, relative and absolute roots, and precedence when both mechanisms match. Post-release bugs will be handled through the normal Bicep issue and servicing process.
 
 ## Unresolved questions
 
@@ -978,7 +1047,7 @@ No unresolved question blocks the functional design. Diagnostic codes and final 
 
 ## Out of scope
 
-- Deprecating or removing `moduleAliases`, `br/<alias>:`, or `ts/<alias>:` references. A separate REP must define migration tooling, schema deprecation, diagnostics, timelines, and removal criteria. The predefined `br/public:` alias remains supported independently of user-defined `moduleAliases`.
+- Deprecating or removing `moduleAliases`, `moduleAliasesMock`, `br/<alias>:`, or `ts/<alias>:` references. A separate REP must define migration tooling, schema deprecation, diagnostics, timelines, and removal criteria. The predefined `br/public:` alias remains supported independently of user-defined `moduleAliases`.
 - Defining environment-specific configuration discovery, selection, inheritance, or merging. That behavior requires a separate REP.
 - Defining inheritance for extension configuration or declarations. Extension inheritance is related because inherited extension declarations would make it easier to redirect extensions to local packages consistently across a repository without repeating configuration, but it will be addressed separately.
 - Redirecting one remote artifact reference to another remote artifact. A future proposal may introduce the explicit `artifacts.allowUnsafeRemoteArtifactRedirects` opt-in, but this setting is not part of the current design.
