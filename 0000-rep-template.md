@@ -45,9 +45,9 @@ Deprecated By: <Applicable to existing final REPs only. Fill a final REP number 
 ```bicep
 ```
 
-## Drawbacks
+## Tradeoffs
 
-> Discuss any potential drawbacks associated with this approach. Why might this *not* be a suitable choice? Consider implementation costs, integration with existing and planned features, and the migration cost for Bicep users. Clearly identify if it constitutes a breaking change.
+> Identify the material costs and risks that reviewers must accept with this design. Focus on user experience, compatibility, security, maintainability, implementation complexity, and constraints on future work. Keep this section to three to five concise items. Do not repeat implementation tasks, rejected alternatives, or rollout steps covered elsewhere. Include mitigations where they materially reduce a risk, and clearly identify any breaking changes.
 
 ## Alternatives
 
