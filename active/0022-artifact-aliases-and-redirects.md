@@ -480,7 +480,7 @@ and referenced by that name:
 extension foo
 ```
 
-The `extensions` entry maps the declaration name `foo` to a fully qualified artifact reference. It is distinct from `artifacts.aliases`, which defines reusable artifact-location aliases. The expected artifact type is known from the declaration. Module references must end in `.bicep` or `.json`, and local extension references must end in `.tgz`. Bicep loads the referenced file directly and does not probe its containing directory for a conventional filename.
+The `extensions` entry maps the declaration name `foo` to a fully qualified artifact reference. It is distinct from `artifacts.aliases`, which defines reusable artifact-location aliases. The expected artifact type is known from the declaration. Module references must end in `.bicep` or `.json`. Local extension references do not require a particular filename extension; `.tgz` is conventional, but Bicep determines validity from the package contents. Bicep loads the referenced file directly and does not probe its containing directory for a conventional filename.
 
 When a local `.bicep` module contains further references, its ordinary relative references and fully qualified `local:` references are anchored to that module file. The closest applicable `bicepconfig.json` is selected for each source file using existing configuration discovery rules. Artifact aliases and redirects therefore apply to transitive references as well as references in the entrypoint. A redirect is applied at most once to each reference; after it selects a local file, references inside that file are resolved normally. Existing module-cycle detection continues to report cycles involving local or redirected modules.
 
@@ -537,7 +537,7 @@ A redirect target must:
 - Resolve to exactly one local artifact file.
 - Be resolved relative to the configuration file in which the redirect is declared.
 - Refer to a `.bicep` or `.json` file for a module import.
-- Refer to a `.tgz` file for an extension import.
+- Resolve to a valid extension package for an extension import; the filename does not require a particular extension.
 - Satisfy the existing filename, content, encoding, and size requirements of the function for a compile-time data-file load.
 
 A redirect target must not be:
@@ -1054,4 +1054,4 @@ No unresolved question blocks the functional design. Diagnostic codes and final 
 - Defining a general-purpose source import alias or filesystem globbing system.
 - Publishing, authenticating, or maintaining a registry cache for `local:` artifacts.
 - Changing OCI distribution protocols, registry authentication, Template Spec APIs, or the ARM deployment contract.
-- Defining new artifact package formats beyond the existing Bicep module JSON and extension `.tgz` formats.
+- Defining new artifact package formats beyond the existing Bicep module JSON and gzip-compressed tar extension package formats.
