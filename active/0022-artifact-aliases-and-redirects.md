@@ -29,7 +29,7 @@ The primary scenarios are a consistent artifact-reference experience across modu
 - **Artifact scheme**: A prefix such as `oci:`, `ts:`, or `local:` that identifies how Bicep resolves an artifact.
 - **Artifact alias**: A logical name that maps to an artifact location and is referenced with the `::` separator.
 - **Artifact redirect**: A development-time override that maps an artifact reference or pattern to one relative local file.
-- **MAR**: Microsoft Artifact Registry, exposed through the predefined `mar` alias.
+- **MAR**: Microsoft Artifact Registry, formerly known as Microsoft Container Registry (MCR), exposed through the predefined `mar` alias.
 - **AVM**: Azure Verified Modules, exposed through the predefined `avm` alias.
 - **OCI**: Open Container Initiative. In this proposal, `oci:` identifies registry-backed artifacts distributed using OCI protocols.
 - **Template Spec**: An Azure Resource Manager template artifact referenced with the `ts:` scheme.
