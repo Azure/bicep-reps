@@ -1,9 +1,9 @@
 ---
-REP Number: 0009
+REP Number: "0009"
 Author: levimatheri (Levi Muriuki)
 Start Date: 2024-09-09
-Feature Status: Private Preview
-Bicep Issue Number(s): [#645](https://github.com/Azure/bicep/issues/645), [#4959](https://github.com/Azure/bicep/issues/4959), [#9969](https://github.com/Azure/bicep/discussions/9969)
+Feature Status: Public
+Bicep Issue Number(s): "[#645](https://github.com/Azure/bicep/issues/645), [#4959](https://github.com/Azure/bicep/issues/4959), [#9969](https://github.com/Azure/bicep/discussions/9969)"
 ---
 
 # Title - New deployment principal function

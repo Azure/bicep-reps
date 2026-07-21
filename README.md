@@ -80,9 +80,9 @@ stateDiagram-v2
     Draft --> Review: Review the PR
     Review --> Active: PR accepted
     Review --> Rejected: PR rejected and closed
-    Active --> Active: Create new PRs to\n make revisions
+    Active --> Active: Create new PRs to<br/>make revisions
     Active --> Final: Feature fully implemented
-    Active --> Deferred: Not enough feedback\n has been received to\n finalize the feature
+    Active --> Deferred: Not enough feedback<br/>has been received to<br/>finalize the feature
     Final --> Deprecated: REP superceded by a new REP
     Rejected --> [*]
 ```
