@@ -17,7 +17,7 @@ This proposal introduces:
 - `artifacts.aliases`, which provides reusable aliases for artifact locations.
 - `artifacts.redirects`, which redirects artifact references to relative local files for development and testing, with optional named capture substitution.
 - `mar` and `avm`, predefined OCI artifact aliases for Microsoft Artifact Registry and Azure Verified Modules whose OCI locations can be overridden.
-- `local`, a first-class artifact scheme for resolving artifacts from the local filesystem.
+- `file`, a first-class artifact scheme for resolving artifacts from the local filesystem.
 - `oci`, the canonical scheme for registry-backed artifacts.
 
 The primary scenarios are a consistent artifact-reference experience across modules and extensions and local artifact development in monorepos. This proposal preserves existing `br` references, `moduleAliases` configuration, and `moduleAliasesMock` behavior without warnings or required migration.
@@ -26,7 +26,7 @@ The primary scenarios are a consistent artifact-reference experience across modu
 
 - **Artifact**: A Bicep module, extension package, Template Spec, local data file, or future package type that Bicep can reference or load.
 - **Artifact reference**: The source text that identifies an artifact, either through a fully qualified scheme or an alias.
-- **Artifact scheme**: A prefix such as `oci:`, `ts:`, or `local:` that identifies how Bicep resolves an artifact.
+- **Artifact scheme**: A prefix such as `oci:`, `ts:`, or `file:` that identifies how Bicep resolves an artifact.
 - **Artifact alias**: A logical name that maps to an artifact location and is referenced with the `::` separator.
 - **Artifact redirect**: A development-time override that maps an artifact reference or pattern to one relative local file.
 - **MAR**: Microsoft Artifact Registry, formerly known as Microsoft Container Registry (MCR), exposed through the predefined `mar` alias.
@@ -89,7 +89,7 @@ The reference `br/company:network/vnet:1.0.0` resolves to `./modules/network/vne
 
 `artifacts.redirects` generalizes this scenario to fully qualified and aliased modules, extensions, Template Specs, and data files, with explicit target paths and optional captures. Existing `moduleAliasesMock` configurations remain supported as described under **Incremental adoption from `br` to `oci`**.
 
-For monorepos, [Azure/bicep#19883](https://github.com/Azure/bicep/issues/19883) describes how relative references to shared artifacts become brittle when files move, while publishing every change to a registry inhibits the end-to-end development workflow that a monorepo is intended to provide. Local artifact resolution gives modules, extensions, and data files stable artifact-style references without requiring a publish step. This is the local file registry scenario from the issue; the `local` scheme in this proposal resolves files directly and does not operate an OCI registry.
+For monorepos, [Azure/bicep#19883](https://github.com/Azure/bicep/issues/19883) describes how relative references to shared artifacts become brittle when files move, while publishing every change to a registry inhibits the end-to-end development workflow that a monorepo is intended to provide. Local artifact resolution gives modules, extensions, and data files stable artifact-style references without requiring a publish step. This is the local file registry scenario from the issue; the `file` scheme in this proposal resolves files directly and does not operate an OCI registry.
 
 The proposed model has the following goals.
 
@@ -115,7 +115,7 @@ module storage 'oci:mcr.microsoft.com/bicep/avm/res/storage/storage-account:0.32
 
 module app 'ts:subscription/resourceGroup/templateSpec:v1'
 
-module local 'local:modules/storage/main.bicep'
+module localStorage 'file:modules/storage/main.bicep'
 ```
 
 ### Provide convenient aliases
@@ -164,7 +164,7 @@ Supported schemes are:
 
 - `oci`, the canonical registry artifact scheme.
 - `ts`, the Template Spec scheme.
-- `local`, the local filesystem artifact scheme.
+- `file`, the local filesystem artifact scheme.
 - `br`, the backward-compatible registry module scheme.
 
 Examples:
@@ -174,7 +174,7 @@ module storage 'oci:mcr.microsoft.com/bicep/avm/res/storage/storage-account:0.32
 
 module app 'ts:<subscriptionId>/<resourceGroup>/<templateSpec>:v1'
 
-module storage 'local:modules/storage/main.bicep'
+module storage 'file:modules/storage/main.bicep'
 ```
 
 Fully qualified references do not require configuration. `br` remains supported, but `oci` is the recommended spelling for new registry-backed references.
@@ -208,7 +208,7 @@ avm::res/storage/storage-account:0.32.1
 
 By default, `mar` maps to registry `mcr.microsoft.com` with repository prefix `bicep`, while `avm` maps to the same registry with repository prefix `bicep/avm`.
 
-Both aliases are OCI defaults whose locations can be overridden by entries with the same names in `artifacts.aliases`. An override must have `type: "oci"`; configuration validation fails if an override attempts to change either alias to `ts`, `local`, or a future alias type. This supports private OCI mirrors without allowing a source reference associated with MAR or AVM to change artifact source type. A predefined alias remains a convenience rather than a guarantee of artifact provenance because its registry and repository prefix can change through configuration.
+Both aliases are OCI defaults whose locations can be overridden by entries with the same names in `artifacts.aliases`. An override must have `type: "oci"`; configuration validation fails if an override attempts to change either alias to `ts`, `file`, or a future alias type. This supports private OCI mirrors without allowing a source reference associated with MAR or AVM to change artifact source type. A predefined alias remains a convenience rather than a guarantee of artifact provenance because its registry and repository prefix can change through configuration.
 
 The default mappings are independent of the configured Azure cloud profile. `mar` and `avm` resolve to the same `mcr.microsoft.com` locations in Azure public, government, China, custom, and disconnected cloud profiles. This avoids making one source reference resolve differently when only the Azure Resource Manager cloud changes. Environments that require a sovereign endpoint, private mirror, or disconnected registry can override either alias explicitly in `artifacts.aliases`.
 
@@ -240,7 +240,7 @@ Alias expansion produces the same fully qualified reference that the correspondi
 
 - An OCI identity uses the `oci:` scheme and the registry, repository, and version accepted by the existing registry artifact handler. A legacy `br:` reference is canonicalized by changing the scheme to `oci:` after applying the existing `br` parsing and normalization rules.
 - A Template Spec identity uses `ts:<subscriptionId>/<resourceGroup>/<templateSpec>:<version>` after expanding either a legacy or new alias.
-- A local identity is the normalized filesystem path described under **Local artifact scheme**.
+- A file identity is the normalized filesystem path described under **File artifact scheme**.
 
 Redirect matching uses the normalized identity returned by the artifact handler. It does not treat different tags as equivalent, resolve a tag to a digest, or perform a registry request merely to canonicalize a reference.
 
@@ -360,7 +360,7 @@ resolves to:
 ts:<subscriptionId>/shared-specs-rg/webapp:v1
 ```
 
-#### Local aliases
+#### File aliases
 
 A local alias establishes a stable artifact root relative to the configuration file.
 
@@ -400,11 +400,11 @@ The root `bicepconfig.json` defines one local alias for the shared module librar
   "artifacts": {
     "aliases": {
       "modules": {
-        "type": "local",
+        "type": "file",
         "path": "./modules"
       },
       "assets": {
-        "type": "local",
+        "type": "file",
         "path": "./assets"
       }
     }
@@ -436,32 +436,32 @@ The more deeply nested `solutions/internal-api/regions/westus/main.bicep` uses t
 
 All artifact portions include the complete filename rather than identifying a folder with a conventional entry point. Each alias root is resolved relative to the `bicepconfig.json` that declares it, so every consuming solution covered by that configuration has the same view of the shared module library and assets.
 
-### Local artifact scheme
+### File artifact scheme
 
-`local` resolves artifacts from the local filesystem. It is a filesystem artifact source, not a registry. It does not publish, pull, authenticate, or maintain a registry cache. A locally hosted OCI registry still uses `oci:`, for example:
+`file` resolves artifacts from the local filesystem. It is a filesystem artifact source, not a registry. It does not publish, pull, authenticate, or maintain a registry cache. A locally hosted OCI registry still uses `oci:`, for example:
 
 ```bicep
 module storage 'oci:localhost:5000/bicep/modules/storage:v1'
 ```
 
-A fully qualified `local:` path is resolved relative to the Bicep or Bicep parameter file containing the reference. A `local` alias path is resolved relative to the `bicepconfig.json` that declares the alias, as described above. Redirect targets are also relative to their declaring configuration file. Bicep normalizes `.` and `..` segments and uses the same platform-specific path and case handling as ordinary relative Bicep file references. These references are not resolved relative to the process working directory.
+A fully qualified `file:` path is resolved relative to the Bicep or Bicep parameter file containing the reference. A `file` alias path is resolved relative to the `bicepconfig.json` that declares the alias, as described above. Redirect targets are also relative to their declaring configuration file. Bicep normalizes `.` and `..` segments and uses the same platform-specific path and case handling as ordinary relative Bicep file references. These references are not resolved relative to the process working directory.
 
 A local artifact reference identifies the artifact file, including its filename and extension:
 
 ```bicep
-module storage 'local:modules/storage/main.bicep'
+module storage 'file:modules/storage/main.bicep'
 ```
 
 Compiled module JSON can also be referenced directly:
 
 ```bicep
-module storage 'local:modules/storage/main.json'
+module storage 'file:modules/storage/main.json'
 ```
 
 An extension can reference a local package directly:
 
 ```bicep
-extension 'local:extensions/foo.tgz' as foo
+extension 'file:extensions/foo.tgz' as foo
 ```
 
 Alternatively, the extension can be assigned a name in `bicepconfig.json`:
@@ -469,7 +469,7 @@ Alternatively, the extension can be assigned a name in `bicepconfig.json`:
 ```json
 {
   "extensions": {
-    "foo": "local:extensions/foo.tgz"
+    "foo": "file:extensions/foo.tgz"
   }
 }
 ```
@@ -482,17 +482,17 @@ extension foo
 
 The `extensions` entry maps the declaration name `foo` to a fully qualified artifact reference. It is distinct from `artifacts.aliases`, which defines reusable artifact-location aliases. The expected artifact type is known from the declaration. Module references must end in `.bicep` or `.json`. Local extension references do not require a particular filename extension; `.tgz` is conventional, but Bicep determines validity from the package contents. Bicep loads the referenced file directly and does not probe its containing directory for a conventional filename.
 
-When a local `.bicep` module contains further references, its ordinary relative references and fully qualified `local:` references are anchored to that module file. The closest applicable `bicepconfig.json` is selected for each source file using existing configuration discovery rules. Artifact aliases and redirects therefore apply to transitive references as well as references in the entrypoint. A redirect is applied at most once to each reference; after it selects a local file, references inside that file are resolved normally. Existing module-cycle detection continues to report cycles involving local or redirected modules.
+When a local `.bicep` module contains further references, its ordinary relative references and fully qualified `file:` references are anchored to that module file. The closest applicable `bicepconfig.json` is selected for each source file using existing configuration discovery rules. Artifact aliases and redirects therefore apply to transitive references as well as references in the entrypoint. A redirect is applied at most once to each reference; after it selects a local file, references inside that file are resolved normally. Existing module-cycle detection continues to report cycles involving local or redirected modules.
 
-A local extension package is an explicitly trusted project input. Bicep applies the same package-format, manifest, extension compatibility, and archive-safety validation that it applies after restoring an OCI extension package. Invalid archives, unsafe archive paths, and incompatible manifests fail before the extension is loaded. A local package is not required to have a registry digest or signature because local development must allow the package to change in place. Teams that require immutable or signed extensions should use an OCI reference rather than `local:`. If a redirect replaces a remote extension identity with a local package, the redirect disclosure described below makes that substitution visible.
+A local extension package is an explicitly trusted project input. Bicep applies the same package-format, manifest, extension compatibility, and archive-safety validation that it applies after restoring an OCI extension package. Invalid archives, unsafe archive paths, and incompatible manifests fail before the extension is loaded. A local package is not required to have a registry digest or signature because local development must allow the package to change in place. Teams that require immutable or signed extensions should use an OCI reference rather than `file:`. If a redirect replaces a remote extension identity with a local package, the redirect disclosure described below makes that substitution visible.
 
 #### Data file loading
 
-Local artifact references can be passed to compile-time file-loading functions. The reference includes the complete filename and is resolved through the same `local:` scheme or local alias as module and extension files.
+Local artifact references can be passed to compile-time file-loading functions. The reference includes the complete filename and is resolved through the same `file:` scheme or file alias as module and extension files.
 
 ```bicep
-var notice = loadTextContent('local:assets/notice.txt')
-var settings = loadJsonContent('local:assets/settings.json')
+var notice = loadTextContent('file:assets/notice.txt')
+var settings = loadJsonContent('file:assets/settings.json')
 var deployment = loadYamlContent('assets::deployment.yaml')
 var certificate = loadFileAsBase64('assets::certificates/service.pfx')
 ```
@@ -544,7 +544,7 @@ A redirect target must not be:
 
 - An absolute filesystem path.
 - A directory.
-- An artifact reference such as `oci:`, `ts:`, `local:`, or an alias reference.
+- An artifact reference such as `oci:`, `ts:`, `file:`, or an alias reference.
 - Another redirect pattern.
 
 Resolving paths relative to the declaring configuration file keeps redirects portable and makes their filesystem location unambiguous. A target can intentionally use `../` to select a sibling of the configuration directory. Path normalization uses the same rules as local artifact references; redirects do not introduce a separate filesystem sandbox.
@@ -748,7 +748,7 @@ Redirected content bypasses the registry restore cache and must never be stored 
 
 This proposal makes `oci` the canonical scheme for registry-backed artifacts. The name `br` was originally inspired by Terraform Registry terminology, but it is too generic as Bicep expands beyond one registry model. It does not identify whether an artifact comes from MAR, a private Azure Container Registry, or a locally hosted registry.
 
-`oci` identifies the underlying artifact format and distribution protocol. The same scheme therefore applies consistently to MAR, private registries, locally hosted OCI registries, modules, extensions, and future OCI artifact types. The `local` scheme remains distinct because it resolves files directly and is not a registry.
+`oci` identifies the underlying artifact format and distribution protocol. The same scheme therefore applies consistently to MAR, private registries, locally hosted OCI registries, modules, extensions, and future OCI artifact types. The `file` scheme remains distinct because it resolves files directly and is not a registry.
 
 #### Compatibility with `moduleAliasesMock`
 
@@ -915,7 +915,7 @@ Changing `avm` or `mar` to another alias type is invalid:
   "artifacts": {
     "aliases": {
       "avm": {
-        "type": "local",
+        "type": "file",
         "path": "./avm"
       }
     }
@@ -955,7 +955,7 @@ Only after this tooling is published and users have an adoption period should a 
 The Bicep CLI, compiler, language server, configuration schema, and artifact dispatcher require changes to:
 
 - Parse and validate alias references that use `::`.
-- Recognize `oci:` and `local:` schemes.
+- Recognize `oci:` and `file:` schemes.
 - Resolve and validate typed `artifacts.aliases` entries.
 - Keep `moduleAliases.br`, `moduleAliases.ts`, and `artifacts.aliases` resolution independent, without cross-map fallback or coexistence warnings.
 - Preserve `moduleAliasesMock` behavior and apply it after source-spelling redirects but before legacy alias expansion.
@@ -1017,7 +1017,7 @@ The Bicep source does not change between production and development.
 
 ### Require fully qualified references
 
-Bicep could support only fully qualified `oci:`, `ts:`, and `local:` references. This would minimize configuration, but users would repeatedly encode registry hosts, Azure scopes, and repository prefixes in source. It would also make moving an artifact location costly across a large codebase.
+Bicep could support only fully qualified `oci:`, `ts:`, and `file:` references. This would minimize configuration, but users would repeatedly encode registry hosts, Azure scopes, and repository prefixes in source. It would also make moving an artifact location costly across a large codebase.
 
 ### Use scheme-qualified aliases
 
@@ -1052,6 +1052,6 @@ No unresolved question blocks the functional design. Diagnostic codes and final 
 - Defining inheritance for extension configuration or declarations. Extension inheritance is related because inherited extension declarations would make it easier to redirect extensions to local packages consistently across a repository without repeating configuration, but it will be addressed separately.
 - Redirecting one remote artifact reference to another remote artifact. A future proposal may introduce the explicit `artifacts.allowUnsafeRemoteArtifactRedirects` opt-in, but this setting is not part of the current design.
 - Defining a general-purpose source import alias or filesystem globbing system.
-- Publishing, authenticating, or maintaining a registry cache for `local:` artifacts.
+- Publishing, authenticating, or maintaining a registry cache for `file:` artifacts.
 - Changing OCI distribution protocols, registry authentication, Template Spec APIs, or the ARM deployment contract.
 - Defining new artifact package formats beyond the existing Bicep module JSON and gzip-compressed tar extension package formats.
