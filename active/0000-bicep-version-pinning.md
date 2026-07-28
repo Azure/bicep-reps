@@ -1,9 +1,9 @@
 ---
-REP Number: <Fill me in with a four-digit number matching the pull request number; Update AFTER PR is approved and BEFORE is merged.>
+REP Number: "0011"
 Author: levimatheri (Levi Muriuki)
 Start Date: 2024-11-20
 Feature Status: Private Preview
-Bicep Issue Number(s): [#12290](https://github.com/Azure/bicep/issues/12290), [#8978](https://github.com/Azure/bicep/issues/8978)
+Bicep Issue Number(s): "[#12290](https://github.com/Azure/bicep/issues/12290), [#8978](https://github.com/Azure/bicep/issues/8978)"
 ---
 
 # Bicep version pinning
@@ -21,6 +21,22 @@ This document proposes a feature that enables users to pin specific versions of 
 - **Registry Module:** A reusable component or package that can be published and shared within a registry.
 - **Entrypoint Bicep File:** The main Bicep file that serves as the starting point for a compilation.
 - **Compilation:** The process of converting Bicep code into an Azure Resource Manager (ARM) template.
+
+## Scope
+
+It helps to separate two things this proposal decides: the **version constraint syntax** and the **surfaces** that syntax is applied to.
+
+**Version constraint syntax (in scope).** This proposal defines the version constraint syntax for Bicep. It is designed to be general-purpose: although only the Bicep CLI/compiler will use this syntax initially, the syntax is intended to be reused as-is for registry modules and extensions when range support is later added to them. Getting this syntax right for all future surfaces is a goal of this proposal.
+
+**Surfaces (only the CLI/compiler is enabled now).** Bicep has several distinct version-pinning surfaces. This proposal only wires the syntax up to the Bicep CLI/compiler; enabling it on the other surfaces is future work:
+
+1. **Bicep CLI/compiler version** — **enabled by this proposal.** Adds version and version range support.
+2. **Registry module version** — future work. Exact-tag pinning already exists today; range support is not enabled here.
+3. **Extension version** — future work. Exact-tag pinning already exists today via the `extensions` map in `bicepconfig.json`; range support is not enabled here.
+4. **Core Azure resource type version** — future work. These versions are currently tied to the Bicep CLI release, and decoupling them for independent pinning is not addressed here.
+
+In short: the syntax is designed with modules and extensions in mind, but this proposal only turns it on for the CLI/compiler.
+
 
 ## Motivation
 
@@ -56,7 +72,7 @@ Users can specify version constraints in Bicep using either exact versions or ve
 
 However, the SemVer spec does not include a standard for expressing version ranges.
 
-Inspired by the [npm version range specification](https://docs.npmjs.com/cli/v6/using-npm/semver), the following outlines the version syntaxes we will use for Bicep:
+The following details the syntax we will use for Bicep:
 
 **1. Exact version syntax** 
 
@@ -66,29 +82,34 @@ For exact version constraint, the allowable syntax should be the version itself,
 #### Comparators
 Expresses a set of comparators which specify versions that satisfy the range using the following `>, <, >=, <=` symbols for comparisons.
 
+A version range allows up to two comparator components, separated by a comma `,` (e.g. a lower and an upper bound). Whitespace characters are ignored.
+
 Examples:
 - `>=0.31.0` - accepts any version above and including 0.31.0
 - `<0.31.0` - accepts any version below, but not including 0.31.0
-- `>=0.31.0 <1.0.0` - accepts any versions between 0.31.0 (inclusive), and 1.0.0 (exclusive)
+- `>=0.31.0, <1.0.0` - accepts any versions between 0.31.0 (inclusive), and 1.0.0 (exclusive)
 - `=0.31.0` - equivalent to `0.31.0`
 - `>=1.2` - equivalent to `>=1.2.0`
 - `>=1` - equivalent to `>=1.0.0`
 
-#### Tilde Ranges
-Uses `~` to allow patch-level changes if a minor version is specified on the comparator. Allow minor-level changes if not. 
+#### Applying the syntax to module and extension references (future)
 
-Examples:
-- `~1.2.3` - equivalent to `>=1.2.3 <1.3.0`
-- `~1.2` - equivalent to `>=1.2.0 <1.3.0`
-- `~1` - equivalent to `>=1.0.0 <2.0.0`
+> [!NOTE]
+> Version range support for registry modules and extensions is out of scope for this proposal (see [Scope](#scope)). This section is included only to illustrate how the syntax defined above is intended to carry over to registry module and extension references in the future, so that the syntax we commit to now works well for those surfaces. It does not imply this behavior ships as part of this proposal.
 
-#### Caret Ranges
-Uses `^` to allow minor and patch-level changes.
+When version range support is added to registry module and extension references, the same comparator syntax will be used. However, because the version is appended to the artifact path within the same string, a version range must be wrapped in parentheses `()` to visually delimit it from the path, and its components separated by commas `,`.
 
-Examples:
-- `^1.2.3` - equivalent to `>=1.2.3 <2.0.0`
-- `^1.2` - equivalent to `>=1.2.0 <2.0.0`
-- `^1` - equivalent to `>=1.0.0 <2.0.0`
+Registry module example:
+
+```bicep
+module foo 'oci:foo/bar:(>=1.2.0, <2.0.0)' = { ... }
+```
+
+Extension example:
+
+```bicep
+extension 'br:mcr.microsoft.com/bicep/extensions/microsoftgraph/v1.0:(>=1.0.0, <2.0.0)' as graphV1
+```
 
 
 ### Update Bicep compiler 
@@ -103,21 +124,21 @@ If a user runs Bicep CLI directly to build a bicep file, we will try to resolve 
 #### Linter rules
 - Since we've chosen to use bicepconfig.json for version constraints, the current expectation is consistent resolution logic (e.g., the closest `bicepconfig.json` to a Bicep file is used). 
 - This also means users may specify different version constraints in different `bicepconfig.json` files. 
-- External tools do not understand how Bicep source files are grouped, therefore they can't detect version constraints in referenced modules. 
-- External tools can parse the version constraint for the entrypoint Bicep file, but conflicts won't be detected in referenced modules until the installed Bicep CLI is invoked.
+- External tools do not understand how Bicep source files are grouped, therefore they can't detect version constraints in referenced Bicep files. 
+- External tools can parse the version constraint for the entrypoint Bicep file, but conflicts won't be detected in referenced Bicep files until the installed Bicep CLI is invoked.
 
-- In order to help the users prevent such runtime issues, we will two linter rules:
-1. **Incompatible Module Constraints:**
-    - If the version constraints specified in `bicepconfig.json` files across modules cannot be combined into a single valid version range (i.e. disjoint ranges), emit an error. For example:
-    - Module A requires `>=0.31.0 <0.32.0`.
-    - Module B requires `>=0.15.0 <0.16.0`.
-    - These constraints cannot be satisfied simultaneously, so the emit an error.
+- In order to help the users prevent such runtime issues, we will add two linter rules. Note that "referenced Bicep file" below means a `.bicep` file pulled into the compilation graph (e.g. via a `module` declaration pointing at a local path) that has its own `bicepconfig.json`; it does not refer to a published registry module.
+1. **Incompatible Constraints Across Referenced Bicep Files:**
+    - If the version constraints specified in the `bicepconfig.json` files across referenced Bicep files cannot be combined into a single valid version range (i.e. disjoint ranges), emit an error. For example:
+    - Referenced Bicep file A requires `>=0.31.0,<0.32.0`.
+    - Referenced Bicep file B requires `>=0.15.0,<0.16.0`.
+    - These constraints cannot be satisfied simultaneously, so we emit an error.
 
-2. **Looser Constraints in a parent module:**
-   - If the version constraint for the bicep file being edited is looser than any of the referenced modules' constraints, emit an error. For example:
+2. **Looser Constraints in the Entrypoint File:**
+   - If the version constraint for the Bicep file being edited is looser than any of the referenced Bicep files' constraints, emit an error. For example:
    - Entrypoint file requires `>=0.15.0`.
-   - Referenced module requires `<0.17.0`.
-   - Because the external tool only looks at the entrypoint file, it may download a version that is incompatible with a referenced modules (e.g. version `0.21.0` in the example).
+   - Referenced Bicep file requires `<0.17.0`.
+   - Because the external tool only looks at the entrypoint file, it may download a version that is incompatible with a referenced Bicep file (e.g. version `0.21.0` in the example).
 ----------------
 
 ### VSCode experience
@@ -134,7 +155,7 @@ We will need to clearly document this behavior in which the pinning is not stric
 ### AzCLI updates
 #### Basic mechanism
 - The AzCLI bicep module should be enhanced to parse the appropriate `bicepconfig.json` file by recursively searching upwards from the current directory. It should then install the latest Bicep version that satisfies the specified version constraints. 
-    - For example, given the version constraint `>=0.31.0 <0.32.0` and the available Bicep release tags `[0.21.14, 0.31.1, 0.31.92, 0.32.45]`, AzCLI would download version `0.31.92`.
+    - For example, given the version constraint `>=0.31.0,<0.32.0` and the available Bicep release tags `[0.21.14, 0.31.1, 0.31.92, 0.32.45]`, AzCLI would download version `0.31.92`.
 - If no version constraints are found, AzCLI should default to using locally installed version (or downloading the latest version if no Bicep is not installed locally).
 
 #### Note about `use_binary_from_path` config value
@@ -210,7 +231,7 @@ For example:
 *Advantages*:
 
 1. The syntax is easier to read and understand as the symbols used are commonly used for comparison operations within Bicep and other tools.
-2. Would require minimal or no learning curve for customers coming from an npm or terraform background
+2. Would require minimal or no learning curve for customers coming from an npm background
 3. Many programming languages  have libraries that provide functions to parse this syntax, including:
     - .NET ([semver package](https://semver-nuget.org/v3.0.x/))
     - Python ([packaging library](https://packaging.pypa.io/en/stable/specifiers.html#packaging.specifiers.SpecifierSet))
@@ -232,9 +253,10 @@ However, we should impose the following restrictions:
 1. The wilcard `*` cannot be used together with the version comparison syntax. 
     - Reason: This is to prevent ambiguous snytaxes like this: `>=1.*`. It is hard to reason about the allowed range in this case, i.e. does the range start from `1.0.0` or `1.1.2` or `1.3.5` or something else?
 2. If a version number is replaced with a wildcard, then all later version numbers must also be wildcards. Thus `2.*.6` is an invalid wildcard version. 
-    - Reason: Most semver parsing tools (including the [tools sampled above](#option-2-npmterraform-syntax)) either do not support this, or they ignore anything after the `*`.
+    - Reason: Most semver parsing tools (including the [tools sampled above](#option-2-npm-syntax)) either do not support this, or they ignore anything after the `*`.
 
-✅ We chose to go with Option 2 as it is more commonly used, flexible, and easy to read. See more details under [unresolved questions](#unresolved-questions).
+✅ We chose to go with Option 2 (without `~` and `^`) as it is more commonly used, flexible, and easy to read. See more details under [unresolved questions](#unresolved-questions).
+
 
 ## Rollout plan
 
@@ -261,7 +283,7 @@ However, we should impose the following restrictions:
 
 4. Should we support `^` and `~` prefixes as used by [npm](https://docs.npmjs.com/cli/v6/using-npm/semver#advanced-range-syntax)?
 
-    ✅ Decision was to include them as they is widely used. We will need to have good documentation about them as it is not immediately obvious what the symbols mean.
+    ✅ Decision was to leave them out for the initial release and ship only the comparator operators (`>`, `<`, `>=`, `<=`), which already cover all version range scenarios. `^` and `~` are syntactic sugar and can be added later based on user feedback once the feature is released.
 
 5. Should we build our own parsers or use libraries/packages?
 
@@ -269,5 +291,7 @@ However, we should impose the following restrictions:
 
     
 ## Out of scope
-1. Making this work in AzPwsh would be nice to have as the owning team is now more open for us to make changes, but would involve significant work to make it at par with AzCLI. This can be considered future enhancement.
-2. There were concerns about how this would work with bicepconfig.json resolution mechanism. Today, the closest bicepconfig.json file is used to resolve configurations relative to the bicep/bicepparam file being compiled. Since there exists no merge process for the bicepconfig.json files, this could be problematic in the cases where users want to have repo-wide settings honored even with child folders containing their own bicepconfig.json files. This limitation, however, has existed already, and hence orthogonal to this proposal; we could adopt this proposal without necessarily solving the bicepconfig.json limitation. 
+1. **Version range support for registry modules and extensions.** Their existing exact-tag pinning continues to work unchanged, and any future range support should adopt the syntax defined in this proposal.
+2. **Independent version pinning for core Azure resource types.** These versions stay coupled to the Bicep CLI release for now.
+3. **Bringing this feature to AzPwsh.** This would be nice to have now that the owning team is more open to changes, but reaching parity with AzCLI is significant work and is left as a future enhancement.
+4. **Redesigning `bicepconfig.json` resolution.** Today, the closest `bicepconfig.json` file is used to resolve configuration relative to the bicep/bicepparam file being compiled, and there is no merge process across `bicepconfig.json` files. This can be problematic when users want repo-wide settings honored even where child folders have their own `bicepconfig.json`. That limitation predates this proposal and is orthogonal to it; we can adopt this proposal without solving it.
