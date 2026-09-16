@@ -1,5 +1,5 @@
 ---
-REP Number: "0000"
+REP Number: "0026"
 Author: levimatheri (Levi Muriuki)
 Start Date: 2026-08-23
 Feature Status: Private Preview
@@ -83,18 +83,31 @@ In the future, this would allow such experiences like deploying an AVM module di
 
 ### CLI surface changes
 
+**Bicep CLI:**
+
 ```sh
 # Compile the entry point and nested modules as separate OCI layers rather than
 # inlining them into one file, and publish the result as a deployable artifact.
 bicep publish main.bicep --target br:<registry>/<repo>:<tag> --artifact-format layered
+```
 
-# Deploy an already-published artifact.
-bicep deploy --resource-group <rg> --template-oci-reference <registry>/<repo>:<tag>
+`bicep publish` gains an `--artifact-format` parameter, accepting two values: `single` (the existing single-file format, and the default when the parameter is omitted) and `layered`. 
+
+**Az CLI:**
+
+```sh
 az deployment group create --resource-group <rg> --template-oci-reference br:<registry>/<repo>:<tag>
+```
+
+`az deployment group create` gains a `--template-oci-reference` parameter, mutually exclusive with `--template-file`/`--template-uri`/`--template-spec`.
+
+**PowerShell CLI:**
+
+```powershell
 New-AzResourceGroupDeployment -ResourceGroupName <rg> -TemplateOciReference br:<registry>/<repo>:<tag>
 ```
 
-`bicep deploy` and `az deployment group create`/`New-AzResourceGroupDeployment` gain a `--template-oci-reference` parameter (mutually exclusive with `--template-file`/`--template-uri`/`--template-spec`). Publishing and deploying remain two distinct, explicit steps — neither command publishes on the caller's behalf. See [Artifact format](#artifact-format) for what `--artifact-format layered` actually produces.
+`New-AzResourceGroupDeployment` gains a `-TemplateOciReference` parameter, mutually exclusive with `-TemplateFile`/`-TemplateUri`/`-TemplateSpecId`.
 
 ### Artifact format
 
@@ -193,6 +206,7 @@ Suppose `main.bicep` deploys one nested module, `modules/network.bicep`. Running
 **CI/CD considerations:**
 
 - Publishing becomes a build step that requires `Container Registry Repository Writer` on [ABAC-enabled registries](https://learn.microsoft.com/en-us/azure/container-registry/container-registry-rbac-abac-repository-permissions?tabs=azure-portal), or `AcrPush` on non-ABAC registries, in the pipeline's service connection, in addition to its existing deployment permissions.
+- If the pipeline already publishes container images to the same registry, no additional permission configuration is needed: the required role (`Container Registry Repository Writer` or `AcrPush`) is the same one that already grants it push access, since Bicep artifacts use the same registry push/pull model as container images.
 
 **Authentication expectations:**
 
@@ -294,7 +308,7 @@ To prevent external or mutable dependencies:
 - A nested deployment may alternatively use an inline `template`.
 - A nested deployment's `templateLink` must **not** specify `uri`, `id`, `relativePath`, `queryString`, or `ociReference`. Only `digest` is allowed, so an artifact cannot reach outside itself.
 - The engine tracks the originating `ociReference` across nested inline templates, so these restrictions apply recursively.
-- Allowing nested `ociReference` links (e.g., to a different repository) is a possible future extension, not part of this proposal.
+- Nested deployments cannot reference a different repository or registry than the one the parent artifact was resolved from. Allowing this would require the Deployments service to hold or obtain pull credentials for arbitrary external registries, and would mean an artifact is no longer self-contained (its deployment closure could change based on content the artifact owner doesn't control).
 
 ### Microsoft.Resources/deployments API changes
 
