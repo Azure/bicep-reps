@@ -2,32 +2,84 @@
 REP Number: "Unassigned"
 Author: andyleejordan (Andy Jordan)
 Start Date: 2026-09-18
-Feature Status: "Proposed; not shipped"
+Feature Status: Private Preview
 ---
 
 # Bicep update discovery and Dependabot integration
 
 ## Summary
 
-Add `bicep outdated` for read-only, JSON-capable update discovery and `bicep update` for an explicitly requested, one-occurrence-at-a-time edit. Bicep owns parsing, version lookup, and source edits; Dependabot owns scheduling, version selection, and pull requests. We propose three independently enabled Dependabot ecosystems: modules, resource API versions, and Bicep CLI version pins. The ecosystem split is pending review with the Dependabot team.
+Add `bicep outdated` to find newer versions of Bicep dependencies, with human-readable and versioned JSON output, and `bicep update` to apply an explicitly selected version to one source occurrence. Bicep owns reference discovery, configuration resolution, candidate lookup, and source edits. Dependabot chooses versions under its existing policies and opens pull requests.
+
+We propose three independently enabled Dependabot ecosystems for registry modules, resource API versions, and Bicep CLI version pins. Their names and separation need review with the Dependabot team. The implementation can start with public AVM modules without implicitly enabling the other two update types.
+
+## Terms and definitions
+
+- **Entrypoint**: A Bicep or Bicep parameters file selected for analysis. Its reachable local files can be outside the entrypoint's directory.
+- **Occurrence**: One versioned reference in a source or configuration file. The same dependency can have several occurrences at different versions.
+- **Effective configuration**: The settings Bicep resolves for a source file from its nearest `bicepconfig.json`, any inherited configuration files, and the built-in defaults.
+- **Candidate**: An available version at the resolved source, not a claim that adopting it is safe or that it meets Dependabot's update policy.
 
 ## Motivation
 
-[dependabot/dependabot-core#15952](https://github.com/dependabot/dependabot-core/issues/15952) asks for public AVM module updates. Bicep already understands registry references, aliases, configuration, and resource API versions; duplicating that knowledge in Ruby would make the integration fragile. Native commands also let users inspect and apply individual updates without Dependabot.
+[dependabot/dependabot-core#15952](https://github.com/dependabot/dependabot-core/issues/15952) requests Dependabot updates for public AVM modules. A module reference may use a registry alias, a local redirect, or configuration inherited from another directory. Bicep source files can also refer to local modules whose own configuration differs from the entrypoint's. A Ruby parser or registry client would have to duplicate these Bicep-specific rules and keep up as the language changes.
+
+The native commands should be useful without Dependabot: a person can see which versions are available, then request one exact edit. This preserves Marcin's [explicit-version approach to external modules](https://github.com/Azure/bicep/issues/3186): neither `outdated` nor `update` silently selects "latest" in a Bicep source file. Dependabot applies its own `allow`, `ignore`, grouping, cooldown, and prerelease rules before it requests an edit.
 
 ## Detailed design
 
-### One Bicep interface, three proposed ecosystems
+### Client side changes: one native interface
 
-| Proposed `package-ecosystem` | Inventory | Update target |
+These commands illustrate the intended interface; exact flag spelling can be settled during CLI implementation:
+
+```sh
+bicep outdated infra/main.bicep
+bicep outdated infra/main.bicep --kind module --output-format json --schema-version 1
+bicep outdated infra/main.bicep --kind resource-api --output-format json --schema-version 1
+bicep outdated infra/main.bicep --kind cli --output-format json --schema-version 1
+bicep update shared/storage.bicep --kind module --reference 'br/public:avm/res/storage/storage-account:0.6.0' --version 0.7.0
+bicep update --request update.json
+```
+
+By default, the human-facing command reports modules; other kinds are explicit so adding them cannot change a user's module-only results. Dependabot always requests exactly one kind. `outdated` makes no source changes. Its JSON identifies each occurrence, its original spelling and resolved dependency identity, its current version or constraint, available candidates and their source, and whether the reference was checked, unsupported, or failed. A registry module identifies its registry and repository; a resource API identifies its resource type, not a fictional registry. Known newer API versions are distinct from the `use-recent-api-versions` linter's recommendations. An authentication failure or unresolved reference must not look like "up to date." The CLI writes machine results to stdout and progress or errors to stderr.
+
+`bicep update` takes one occurrence, an expected current value, and an exact target chosen by its caller. It verifies that the request still identifies the same source and reference, changes only that occurrence, and preserves aliases, formatting, comments, and unrelated versions. The human-facing command identifies an unambiguous reference within the named file; if two occurrences match, it asks for a more precise selection instead of editing both. Dependabot supplies the precise occurrence in its request and can rerun discovery between successive edits to the same file. Stale or ambiguous requests fail.
+
+This discover-then-explicit-update design has familiar precedent: [.NET's `dotnet package list --outdated --format json --output-version 1`](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-package-list) separates discovery from [`dotnet package add ... --version`](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-package-add), while [`npm outdated`](https://docs.npmjs.com/cli/v11/commands/npm-outdated/) supports targeted and JSON output. Bicep needs occurrence-level selection because one file can use the same module at two versions. The JSON boundary is a Bicep CLI contract, not a supported public .NET API or an export of compiler syntax-tree objects; field names, spans, and exit codes can be finalized with implementation tests.
+
+### Following the source and configuration graph
+
+`bicep outdated main.bicep` follows its local Bicep references, including local implementations selected through aliases or redirects. For each reached source file, Bicep independently discovers the nearest `bicepconfig.json` and follows its `extends` chain as specified in [REP 0023](https://github.com/Azure/bicep-reps/blob/main/final/0023-bicep-configuration-inheritance.md). An inherited base need not be named `bicepconfig.json` or live under the entrypoint's directory. Bicep also knows which configuration file actually declares a version pin, so `update` edits that file rather than adding an override to the leaf. Published registry artifacts are not traversed for dependencies inside them, consistent with the [package-layout proposal](https://github.com/Azure/bicep/issues/3266).
+
+Dependabot's `directory` selects entrypoints, not the boundary of a Bicep dependency graph. It must make the repository files available to Bicep for traversal, rather than parse references and `extends` in Ruby to decide what to fetch. Reachable files outside `directory` are eligible for updates unless explicitly excluded; excluded files may still be read to interpret an entrypoint but are not edit targets. The same occurrence reached from several entrypoints should be proposed once. We need to confirm this update scope with Dependabot maintainers. A referenced file outside the repository may work for a person's local invocation but is not available to a hosted repository job; that job must say it cannot analyze the graph, not quietly return a partial inventory.
+
+### Version sources and supported references
+
+Module discovery uses Bicep's artifact resolution and registry code, extended as necessary to list tags in the resolved repository. It starts with exact, comparable OCI tags and public AVM modules; expanding to other public and private OCI repositories must use the same source-aware path. An alias named `public` or `avm` can point to a mirror. Candidates must come from the actual configured registry, never an assumed public index. The original tag spelling is preserved for edits, even if versions are normalized for comparison.
+
+[REP 0022](https://github.com/Azure/bicep-reps/blob/main/active/0022-artifact-aliases-and-redirects.md) permits a registry-looking reference to resolve to a local file through `artifacts.redirects` or the existing `moduleAliasesMock`. Bicep should follow that local file for analysis but not offer registry updates for the redirected occurrence as though it had loaded a published module. Template Specs, digest-only references, and tags that cannot be compared are reported as unsupported, not silently omitted. Initial support for `module`, compile-time `import`, and `.bicepparam` `using` references needs an explicit coverage decision; unimplemented forms should be identified as such.
+
+Resource API candidates use Bicep's existing type catalog and the version lookup behind [`use-recent-api-versions`](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/linter-rule-use-recent-api-versions). They do not require a new Azure service or depend on whether the linter emits a warning: a known newer version may exist even when the linter accepts the current one. The catalog is not proof of availability in a particular subscription or region, and date-based API versions must not be compared as SemVer. Preview versions and API-version expressions require their own coverage and selection policy.
+
+Dependabot's configured registry secrets and proxy appear sufficient for private registries, but that requires a packaged-runner test of authentication, proxy routing, and noninteractive tag listing. Credentials must not appear in CLI arguments, JSON results, logs, or edited files. Authentication errors cannot cause a fallback to a public registry. The published-module content itself is not scanned or rewritten.
+
+### Bicep CLI bootstrap and version pins
+
+The Dependabot runner always obtains the latest Bicep CLI from the [Bicep CDN](https://msazure.visualstudio.com/One/_wiki/wikis/Azure%20Deployments%20Team%20Wiki/750669/Bicep-CDN) first. That executable follows the source and configuration graph to find the effective `cli.version`, including values declared in an extended base configuration. If pinned, the runner gets the matching CLI from the CDN and uses it for module and resource analysis; without a pin, it keeps the latest. For a range, it chooses the newest available release satisfying the constraint, as proposed in the [version-pinning REP](https://github.com/Azure/bicep-reps/pull/11). If reachable files impose incompatible constraints, the runner must report the conflict rather than guess which pin wins.
+
+The CLI-pin ecosystem uses the bootstrap executable to discover releases and edit an exact `cli.version` pin; a range can be resolved for running Bicep without pretending that its update policy is the same as an exact pin. Range edits are deferred until their intended meaning is agreed. Discovery must not require successful compilation with a bootstrap CLI that violates the project pin. [AzCLI's Bicep downloader](https://github.com/Azure/azure-cli/blob/dev/src/azure-cli/azure/cli/command_modules/resource/_bicep.py) demonstrates CDN release and platform downloads; the version-pinning REP proposes AzCLI reading `bicepconfig.json`, but does not establish that current AzCLI already does so. A pinned CLI too old to support the commands or JSON contract needs an explicit unsupported-version result and a minimum-version decision before rollout.
+
+### Dependabot enrollment and implementation
+
+These are proposed `package-ecosystem` identifiers, subject to Dependabot review:
+
+| Ecosystem | Updates | Reason for separate enrollment |
 | --- | --- | --- |
-| `bicep-modules` | Exact-tag OCI module references | The selected reference in a `.bicep` or `.bicepparam` file |
-| `bicep-resources` | Resource API versions known to Bicep | One resource API-version occurrence |
-| `bicep-cli` | The effective `cli.version` constraint in `bicepconfig.json` | That configuration property (exact pins first) |
+| `bicep-modules` | OCI module references | Published packages with registry and tag semantics |
+| `bicep-resources` | Resource API-version occurrences | Date-based service contracts; updating can change deployment behavior |
+| `bicep-cli` | Exact compiler pins in `bicepconfig.json` | Different source, file target, and schedule |
 
-These names and the three-way split are proposals, not accepted Dependabot identifiers. A module job must never begin proposing resource API or compiler updates merely because the Bicep command learns to report them. Resource API changes can affect deployment behavior, so they require their own opt-in and schedule. Compiler pin updates also have a different target and release source. Each ecosystem invokes the same Bicep commands with an explicit kind; shared logic belongs in Bicep where practical.
-
-For example, enrollment in module updates alone would look like:
+For example, enabling modules must not implicitly enable resource API changes:
 
 ```yaml
 version: 2
@@ -38,61 +90,61 @@ updates:
       interval: "weekly"
 ```
 
-Dependabot's `directory` selects starting Bicep files, not a boundary for their dependency graphs. For each entrypoint, `bicep outdated` follows local references and the applicable configuration, including the nearest `bicepconfig.json` and its transitive [`extends` chain](https://github.com/Azure/bicep-reps/blob/main/final/0023-bicep-configuration-inheritance.md). Reachable files may be outside the configured directory. Bicep owns this traversal whether a person or Dependabot invokes it; Dependabot must make the repository files available to Bicep rather than reproduce Bicep's path and configuration rules in Ruby. Files explicitly excluded from updates can still be read to interpret an entrypoint, but must not become edit targets. A missing required file is an error, not an incomplete successful inventory.
+The Bicep integration shares a CLI runner and JSON adapter across the approved ecosystems. Following [Dependabot's new-ecosystem guide](https://github.com/dependabot/dependabot-core/blob/main/NEW_ECOSYSTEMS.md), each ecosystem still needs registration, `FileFetcher`, `FileParser`, `UpdateChecker`, and `FileUpdater` behavior, updater-image packaging, tests, and hosted-service onboarding. Fetching must provide a repository snapshot or equivalent access sufficient for Bicep to follow reachable files and configurations. The parser maps Bicep occurrences to Dependabot dependencies; the checker applies Dependabot's version policy to Bicep's candidates; the updater requests exact Bicep edits and returns changed files. Publication dates for cooldowns need a reliable source; tag order must not be treated as a release date. We do not propose new `dependabot.yml` keys or Bicep-specific meanings for `allow.dependency-type`.
 
-Reachable references outside `directory` are eligible for updates unless explicitly excluded, subject to confirmation that Dependabot's hosted integration accepts that scope. If multiple entrypoints reach the same occurrence, Dependabot should propose it once. Configuration inheritance can also put an effective CLI pin in a base file outside `directory`; an update targets the file that declares the pin, not an invented override in the leaf.
+### Server side changes
 
-### Discovery and editing
+No new Bicep registry protocol or Azure service is required. Dependabot hosted enablement is coordinated separately from merging code into dependabot-core.
 
-Proposed commands (option spelling is subject to CLI review):
+### Microsoft.Resources/deployments API changes
 
-```sh
-bicep outdated main.bicep --kind module
-bicep outdated main.bicep --kind module --output-format json --schema-version 1
-bicep outdated main.bicep --kind resource-api --output-format json --schema-version 1
-bicep outdated bicepconfig.json --kind cli --output-format json --schema-version 1
-bicep update --request update.json
+None.
+
+### Example
+
+Suppose `infra/main.bicep` references `../shared/storage.bicep`, whose own configuration inherits `shared/bicepconfig.base.json`. The shared source contains:
+
+```bicep
+module storage 'br/public:avm/res/storage/storage-account:0.6.0' = {
+  name: 'storage'
+}
 ```
 
-`outdated` returns each checked occurrence with its kind, source file, original spelling, resolved identity, current version or constraint, candidate versions, and source provenance. It reports unsupported references and lookup errors distinctly from up-to-date references. JSON has a versioned envelope, Bicep CLI version, requested kind, results, and diagnostics; it is a Bicep contract, not a dump of compiler objects or a Dependabot-specific protocol. Machine output is one JSON document on stdout, with diagnostics to stderr as appropriate. Finding an update is not an error; failed lookups must not become empty successful results.
+`bicep outdated infra/main.bicep --kind module` follows the local file, resolves its own effective configuration, and reports available versions for the resolved registry and repository. If that registry offers `0.7.0`, Dependabot can select it under the module ecosystem and ask Bicep to change only `0.6.0` in this occurrence. An excluded shared file can inform analysis but is not edited. A resource API version in either file is unchanged unless the resource ecosystem is separately enabled. If configuration redirects the module to a local implementation, no remote update is proposed for that occurrence; Bicep continues following the local implementation.
 
-`update.json` specifies exactly one occurrence from an `outdated` result, its expected original value and file state, and the exact target version selected by the caller. `bicep update` checks those preconditions and that the target belongs to the resolved source, changes only that occurrence, and reports the changed file. It rejects stale or ambiguous requests rather than editing a different reference. Callers rerun discovery before the next edit to the same file. Bicep preserves comments, formatting, aliases, and unrelated versions; the operation does not choose a version, restore modules, compile, or deploy.
+## Tradeoffs
 
-This is deliberately two commands. [.NET's `dotnet package list --outdated --format json --output-version 1`](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-package-list) separates machine-readable discovery from [`dotnet package add ... --version`](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-package-add), which can update a particular package. [`npm outdated [package-spec] --json`](https://docs.npmjs.com/cli/v11/commands/npm-outdated/) also supports targeted discovery. We follow the discover/explicit-update pattern, but require an exact occurrence because Bicep files can contain the same module at different versions. Dependabot, not Bicep, applies `allow`, `ignore`, groups, cooldowns, and prerelease rules.
+- Three ecosystems require more registration and onboarding, but prevent existing module jobs from unexpectedly proposing resource API or compiler changes. The split needs Dependabot maintainer approval.
+- A stable JSON boundary requires compatibility work, but avoids a Ruby Bicep parser and an unsupported public compiler-library API.
+- Graph traversal can reach shared files outside a configured directory and make one edit affect several deployments. Respect explicit exclusions, identify the actual edit target, and let users validate proposed PRs through CI.
+- Native registry lookup must work with Dependabot's credential proxy. Fail visibly when it does not; do not switch sources or leak secrets to make a job appear successful.
 
-### Version sources and CLI bootstrap
+## Alternatives
 
-Module lookup uses Bicep's registry and configuration code, including alias resolution and the registry selected by the project. It queries that repository's available tags; it does not substitute a public index for a private mirror or reimplement OCI access in Ruby. Dependabot's configured registry secrets and proxy appear workable for private registries, subject to an end-to-end test of authentication, proxy routing, and noninteractive execution. Credentials must not appear in JSON, command arguments, logs, or edited source. Authentication errors are errors, not permission to fall back to a public registry.
+**One ecosystem with name filters.** A user could restrict dependency names with `allow`, but ordinary or broad rules would also enable resource API updates whenever that inventory was added. Separate enrollment avoids changing existing jobs' meaning.
 
-Resource API candidates come from Bicep's type catalog, reusing the lookup behind [`use-recent-api-versions`](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/linter-rule-use-recent-api-versions), not its warning threshold. A newer known API version is not necessarily available in every region or safe to adopt. CLI release candidates come from the [Bicep CDN](https://msazure.visualstudio.com/One/_wiki/wikis/Azure%20Deployments%20Team%20Wiki/750669/Bicep-CDN). Missing publication dates must not be invented for Dependabot cooldown decisions.
+**Parse references or list registries in Ruby.** This could resemble other Dependabot integrations, but would duplicate Bicep's aliases, redirects, inherited configuration, and version-source rules. It would not provide the same native `outdated` experience.
 
-The Dependabot runner always bootstraps the latest Bicep CLI from the CDN first. It uses that executable to resolve the effective `cli.version` for the entrypoint through Bicep's own configuration inheritance and, when a pin exists, downloads the pinned version from the CDN and switches to it for module and resource work. For a range, use the newest available release satisfying the constraint, consistent with the [version-pinning REP](https://github.com/Azure/bicep-reps/pull/11). Without a pin, continue with latest. A CLI-pin update is discovered and applied with the bootstrap executable, since changing the constraint may target a different executable. Initially, update exact pins; report range changes as unsupported rather than guessing how to widen a constraint. Discovering a pin must not require successful compilation with a CLI that violates it.
+**Let Dependabot edit Bicep text.** The Bicep linter already has targeted quick-fix machinery, but a diagnostic-driven fix cannot express any exact target Dependabot selects. Bicep-owned editing preserves one source of truth for reference syntax and occurrence selection.
 
-The pinning REP also describes AzCLI resolving `bicepconfig.json` and downloading a matching version; it is design precedent, not a claim that current AzCLI already implements it. [AzCLI's Bicep downloader](https://github.com/Azure/azure-cli/blob/dev/src/azure-cli/azure/cli/command_modules/resource/_bicep.py) shows the CDN release-list and platform-binary download paths. A pinned CLI older than the commands or JSON schema this integration requires cannot be silently replaced by latest: report an unsupported pin and agree on a minimum supported CLI version during rollout.
+## Rollout plan
 
-## Tradeoffs and alternatives
+1. Confirm ecosystem boundaries and names, reachable-file update behavior, registry-secret delivery, and supported pinned CLI versions with Dependabot maintainers.
+2. Add Bicep graph-aware inventory, registry and API-version candidate discovery, versioned `outdated` output, and exact `update` edits. Start end-to-end validation with public AVM modules; keep resource and CLI-pin kinds explicit rather than exposing them through the module job.
+3. Contribute the module ecosystem to dependabot-core using the native commands. Add registry-proxy, inherited-config, redirect, multiple-occurrence, excluded-file, and stale-edit cases to its packaged-runner tests. Enable it in the hosted service under the agreed preview process.
+4. Add the separately enrolled resource API and CLI-pin ecosystems against the same Bicep interface, validating API-version policy, inherited pin locations, cooldown metadata, and older pinned CLIs before hosted enablement. Test private registry jobs end to end before claiming support for them.
 
-- Three ecosystems add Dependabot registration and packaging work, but make each kind an explicit enrollment. Dependabot maintainers may recommend a different separation; do not settle the identifiers before their review.
-- A stable Bicep JSON boundary costs schema maintenance, but avoids both a Ruby Bicep parser and a public Bicep .NET API commitment.
-- Native registry lookup must work through Dependabot's credential proxy. If that fails for a particular registry, report it; do not quietly use Ruby or a different source.
-- Exact, one-at-a-time edits require rediscovery between edits, but avoid accidental convergence of references that intentionally use different versions.
-
-## Implementation and rollout
-
-1. Agree with Dependabot maintainers on ecosystem boundaries and names, CLI packaging, registry-secret delivery, and the minimum supported pinned Bicep version.
-2. In Bicep, implement the shared occurrence inventory, candidate lookup, versioned `outdated` JSON, and exact-target `update` for module references, resource APIs, and `cli.version`. Reuse existing parser, registry, configuration, and API-version code; do not tie discovery to linter warnings.
-3. In dependabot-core, follow its [new-ecosystem guide](https://github.com/dependabot/dependabot-core/blob/main/NEW_ECOSYSTEMS.md): scaffold each approved ecosystem with `rake ecosystem:create[NAME]`, then implement its `FileFetcher`, `FileParser`, `UpdateChecker`, and `FileUpdater`. Share a CLI runner and Bicep JSON adapter across them. Make a repository snapshot available so Bicep can resolve references and extended configuration beyond `directory`; select entrypoints and exclude edit targets according to Dependabot configuration. Bootstrap from the CDN and resolve the pin; parse `outdated` for the requested kind; apply Dependabot's version policy and cooldown; pass the chosen occurrence and version to `update`; return only the changed files. Wire credentials through the existing Dependabot mechanism, package the CLI for the updater image, and complete infrastructure registration and hosted-service onboarding. Recheck generated registrations rather than assuming an ecosystem directory alone enables jobs.
-4. Test public modules, private registries through the credential proxy, mirrors/aliases, inherited configuration, multiple versions of one dependency, excluded files, API-version candidates, exact and range CLI pins, stale edits, unsupported pins, JSON errors, and cooldown metadata. Validate the packaged runner and hosted job before enabling the ecosystems.
+No ARM feature flag or deployment API change is needed. `outdated` does not compile or deploy a project, and a candidate is not proof that the update works with its pinned compiler or deployment environment.
 
 ## Unresolved questions
 
-- Will Dependabot accept three ecosystems, and what identifiers and release gates should they use?
-- Will Dependabot accept updates to reachable files outside `directory` when they are not excluded? The Bicep side still needs to read those files to analyze the entrypoint correctly.
-- Which reference forms (`module`, `import`, `.bicepparam` `using`, resource declarations, API-version functions) are supported in the first increment, and which are reported as unsupported?
-- How will the runner handle a pinned Bicep release below the supported command version, and which publication metadata is reliable enough for cooldowns?
+- Will Dependabot accept three ecosystems and updates to reachable, non-excluded files outside `directory`?
+- Which module reference forms and resource API expressions are supported first, and how should stable and preview API versions be offered?
+- What minimum pinned Bicep version can run the native commands, and how should older pins be handled without silently ignoring them?
+- Where can the ecosystems obtain reliable publication dates for cooldowns, particularly from OCI registries?
 
 ## Out of scope
 
-Automatic upgrades inside published artifacts, Template Specs, digest-only references, arbitrary version-looking parameter values, compilation/deployment validation, and automatic PR merging. Reporting a candidate does not establish deployment compatibility.
+Updating dependencies inside published modules, Template Spec updates, digest refreshes, arbitrary version-looking deployment values, automatic compilation or deployment validation, and automatic PR merging. Extension dependencies and module version ranges can be addressed separately without making them look like OCI module tags or resource API dates.
 
 _Drafted by Copilot with GPT-6 Sol._
