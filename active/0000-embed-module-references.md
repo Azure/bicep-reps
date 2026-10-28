@@ -45,8 +45,8 @@ This REP and the whole-deployment publishing proposal support complementary cust
 
 ### Primary and secondary proposals
 
-- **Primary proposal: link existing registry modules.** Consumers can reuse already-published modules without embedding their compiled templates or publishing their consumer projects. This reduces the consumer template's size without requiring publishers to republish compatible existing modules.
-- **Secondary proposal: enable publishing oversized modules.** Today, AVM advises publishers to keep compiled modules within ARM's 4 MiB template limit. Linking an existing module does not help if that module's own compiled template already exceeds the limit. This REP therefore also proposes a way to package a module and its dependencies as separate templates rather than one inlined template. This would unblock publishing and consuming modules whose combined closure exceeds 4 MiB, while each individual template must still fit within the limit.
+- **Primary proposal: link existing registry modules.** Consumers can use already-published modules without publishing their Bicep projects to ACR, whilst benefitting from reduced deployment payload size.
+- **Secondary proposal: support modules with oversized dependency closures.** Linking a module may bring the initial PUT payload under 4 MiB, but nested deployment PUTs can still fail if the combined size of its inlined dependencies exceed the limit. Packaging module templates as separate, "linked templates" where each source file is represented as a spearate layer can enable very large module closures, and help cut down on overall artifact size if some base modules are reused many times.
 
 ## Detailed design
 
@@ -193,7 +193,7 @@ Add a new setting in `bicepconfig.json` that controls how registry modules are e
     }
 }
 ```
-If the value is set to `reference`, Bicep emits `<registry>/<repository>@<manifest digest>` for both v1 and v2 registry modules.
+If the value is set to `reference`, Bicep emits `<registry>/<repository>@<manifest digest>` for registry modules.
 
 > Bicep emits the manifest digest so DRP deploys the exact artifact resolved during compilation, even if its tag is subsequently overwritten. The digest pins the artifact’s config and all template layers.  
 
@@ -207,7 +207,8 @@ bicep publish <file-path> `
     [--artifact-format inline|multi-layer]
 ```
 
-`bicep publish` is controlled solely by `--artifact-format` and ignores `emitter.registryModules` in `bicepconfig.json` (since published artifacts must be self-contained and never contain `ociReference`).
+- `inline`: Publishes a single template layer with all dependencies inlined recursively (v1).
+- `multi-layer`: Publishes each distinct module in the closure as a separate template layer, linked by `templateLink.digest` within the same artifact (v2).
 
 #### Restoring
 
