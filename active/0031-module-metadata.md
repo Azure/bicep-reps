@@ -146,10 +146,13 @@ The feature must not be implemented as a post-build text replacement. The curren
 
 ```powershell
 # Proposed --module-ref; not supported by Bicep today.
-bicep build .\main.bicep --module-ref br:exampleregistry.azurecr.io/bicep/modules/container-app:0.1.2 --outfile .\main.json
+bicep build .\main.bicep `
+  --module-ref br:exampleregistry.azurecr.io/bicep/modules/container-app:0.1.2 `
+  --outfile .\main.json
 
 # Current pre-compiled JSON publication capability.
-bicep publish .\main.json --target br:exampleregistry.azurecr.io/bicep/modules/container-app:0.1.2
+bicep publish .\main.json `
+  --target br:exampleregistry.azurecr.io/bicep/modules/container-app:0.1.2
 ```
 
 Current Bicep rejects `--with-source` for a JSON input. Supplying `--module-ref` for a pre-compiled JSON publish is rejected because there is no compilation phase in which to inject it. Under this REP, the JSON publication path validates a present `_module` object but never injects, relabels, or rewrites it.
