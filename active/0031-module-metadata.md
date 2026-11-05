@@ -140,6 +140,25 @@ The feature must not be implemented as a post-build text replacement. The curren
 
 `bicep publish` can compile Bicep source directly, then publish the emitted template. This draft proposes the same direct tuple for source-based `publish`, scoped to the module being published. The validator and emitter are shared, not reimplemented in command handlers.
 
+The proposed source-based command is:
+
+```powershell
+# Proposed identity flags; not supported by Bicep today.
+bicep publish .\main.bicep --target br:exampleregistry.azurecr.io/bicep/modules/container-app:0.1.2 --module-type avm --module-id abcdef0 --module-version 0.1.2 --with-source
+```
+
+`bicep publish` also currently accepts a pre-compiled ARM JSON input. The following two-step alternative uses proposed identity flags only on `build`, then uses the current JSON publication capability without identity flags or `--with-source`:
+
+```powershell
+# Proposed identity flags; not supported by Bicep today.
+bicep build .\main.bicep --module-type avm --module-id abcdef0 --module-version 0.1.2 --outfile .\main.json
+
+# Current pre-compiled JSON publication capability.
+bicep publish .\main.json --target br:exampleregistry.azurecr.io/bicep/modules/container-app:0.1.2
+```
+
+Under this REP, the JSON publication path validates a present `_module` object but never relabels or rewrites it. Current Bicep rejects `--with-source` for a JSON input, so source-based publish preserves the one-step compile-and-source-archive flow used by MAR; the two-step path avoids publish identity flags but does not retain that capability without a separate enhancement.
+
 Today, publishing an already-compiled ARM JSON module reads and uploads its bytes directly. This proposal adds validation only when that artifact contains `_module`: a missing object remains a no-op, while a present object must satisfy the closed canonical schema. A valid artifact is published without metadata normalization, rewrite, or template-hash adjustment; an invalid object is rejected before publication. The options must not relabel an already-compiled module.
 
 During a consumer build, the existing ARM JSON writer preserves each restored module's top-level metadata when it is embedded in `Microsoft.Resources/deployments.properties.template`. Consumer CLI values describe only the consumer entry point and must not overwrite those objects. A consumer validates every present `_module` object in restored registry templates and embedded inline nested templates against the closed canonical schema. Valid values are retained unchanged; missing objects remain untouched; invalid, unknown-type, unknown-field, or noncanonical objects fail the build without being normalized or rewritten. Future schema or type additions therefore require consumers to upgrade Bicep before they can consume artifacts that use them.
@@ -276,7 +295,9 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 
 ## Unresolved questions
 
-None for the initial scope; additional preservation paths are deferred.
+1. Should source-based `bicep publish` retain the identity tuple, or should publishing require an earlier Bicep build? Source publish retains one-step compilation and `--with-source`; pre-compiled JSON publication avoids publish identity flags but cannot use `--with-source` without a separate enhancement.
+
+Additional preservation paths are deferred.
 
 ## Out of scope
 
