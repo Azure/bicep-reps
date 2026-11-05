@@ -9,7 +9,7 @@ Feature Status: "Not implemented (draft proposal)"
 
 ## Summary
 
-Introduce optional module-generic build inputs that Bicep validates and emits into a reserved `metadata._module` object in the compiled ARM template. The object contains `type`, `id`, and `version`. Module publishers provide the values through explicit CLI options or the equivalent JSON-RPC compile input. If no input is supplied, Bicep creates no `_module` object and behavior remains unchanged. Published modules retain their own metadata when embedded in a consuming template.
+Introduce optional module-generic build inputs that Bicep validates and emits into a reserved `metadata._module` object in the compiled ARM template. The object contains `type`, `id`, and `version`. Module publishers provide the values through explicit CLI options or the equivalent JSON-RPC compile input. If no input is supplied, Bicep creates no `_module` object and behavior remains unchanged. Existing compiled JSON without `_module` also remains unchanged; when `_module` is present, publication and consumption validate its closed canonical schema before preserving it in the resulting template.
 
 The initial supported module type is `avm`, but the input contract and CLI names are generic. This REP covers supplying, validating, emitting, and preserving the data. How that data is subsequently surfaced or collected is intentionally unspecified.
 
@@ -48,7 +48,7 @@ The current [build command](https://github.com/Azure/bicep/blob/2cba03c71c174ea3
 
 The current [template writer](https://github.com/Azure/bicep/blob/2cba03c71c174ea3c811a1c7a7d8e22ec45d98fa/src/Bicep.Core/Emit/TemplateWriter.cs) emits `metadata._generator` before authored metadata. The [metadata symbol validator](https://github.com/Azure/bicep/blob/2cba03c71c174ea3c811a1c7a7d8e22ec45d98fa/src/Bicep.Core/Semantics/MetadataSymbol.cs) already reserves every metadata identifier beginning with `_`. `_module` should use that reserved namespace, but the compiler needs a new compilation input and emitter path; it cannot be produced as an ordinary Bicep metadata declaration.
 
-Nested Bicep modules are emitted by recursively writing their semantic model. Restored ARM JSON modules use an [ARM template writer](https://github.com/Azure/bicep/blob/2cba03c71c174ea3c811a1c7a7d8e22ec45d98fa/src/Bicep.Core/Emit/ArmTemplateWriter.cs) that writes the parsed template object unchanged. Consequently, JSON-module consumption preserves unrecognized top-level metadata, including `_module`, but does not validate it. The proposal validates the closed schema only when a Bicep publisher compilation emits `_module`; consumption deliberately retains pass-through compatibility.
+Nested Bicep modules are emitted by recursively writing their semantic model. Restored ARM JSON modules use an [ARM template writer](https://github.com/Azure/bicep/blob/2cba03c71c174ea3c811a1c7a7d8e22ec45d98fa/src/Bicep.Core/Emit/ArmTemplateWriter.cs) that writes the parsed template object unchanged. The proposal adds validation before that write: when `_module` is present in a compiled JSON artifact, validate it on raw JSON publication and at consumer restore boundaries, including embedded inline nested templates. A missing object is ignored. A valid object is retained without normalization or rewrite; an invalid object fails the operation.
 
 The [CLI JSON-RPC protocol](https://github.com/Azure/bicep/blob/main/src/Bicep.Cli/Rpc/ICliJsonRpcProtocol.cs) currently exposes `bicep/compile` with a path and optional configuration path, plus `bicep/compileParams`; it has no JSON-RPC publish operation. The initial implementation must extend `bicep/compile` for `.bicep` entry points with the optional structured module tuple. It must use the shared validator and emitter, apply only to that entry point, and never propagate to referenced modules. `bicep/compileParams` produces deployment parameters rather than a module template and does not receive this input. This requires protocol and compiler coverage, not an editor UI change.
 
@@ -119,7 +119,9 @@ This initial version grammar deliberately supports only the numeric release core
 
 The schema is closed: exactly `type`, `id`, and `version` are required, with no additional properties. A future module type requires an explicit allowlist/schema change, not a way to bypass validation.
 
-Diagnostics identify the input source, attribute, and violated rule without echoing the rejected value or the complete metadata object. A URL or accidental secret supplied instead of an identifier or version must not be repeated in diagnostics. An invalid input produces a non-zero exit code and no successful template emission; an existing output file must not be presented as the result of that failed build.
+For a `_module` object already present in compiled JSON, the same closed schema is required in its canonical emitted form: `type` is `avm`, `id` is seven lowercase ASCII hexadecimal characters, and `version` is an unprefixed numeric `MAJOR.MINOR.PATCH` version within the specified bounds. CLI and JSON-RPC inputs may use the accepted uppercase hexadecimal or lowercase `v` input forms because the compiler canonicalizes them before emission. Existing JSON is never normalized or rewritten, so noncanonical values are rejected rather than changed.
+
+Diagnostics identify the input source or artifact boundary, attribute, and violated rule without echoing the rejected value or the complete metadata object. A URL or accidental secret supplied instead of an identifier or version must not be repeated in diagnostics. An invalid input or present `_module` object produces a non-zero exit code and no successful template emission or publication; an existing output file must not be presented as the result of that failed build. This validation reduces accidental data exposure; it does not prove that accepted values are non-sensitive.
 
 Module identifier assignment and uniqueness within a module type remain the module publisher's responsibility, including detecting duplicate `(type, id)` entries in its maintained mapping at assignment time. Reporting consumers can resolve an opaque `(type, id)` to a module name through that externally maintained mapping, consistent with current AVM reporting. That lookup is not part of this compiler contract: the compiler does not resolve an identifier through a catalog, derive it from a registry address, or check its uniqueness online.
 
@@ -136,11 +138,11 @@ The feature must not be implemented as a post-build text replacement. The curren
 
 `bicep publish` can compile Bicep source directly, then publish the emitted template. This draft proposes the same direct tuple for source-based `publish`, scoped to the module being published. The validator and emitter are shared, not reimplemented in command handlers.
 
-Today, publishing an already-compiled ARM JSON module reads and uploads its bytes directly. It does not parse or validate `_module`. The compiler validates the schema when it emits `_module` from Bicep source; publishing an existing JSON artifact preserves it unchanged. The options must not relabel an already-compiled module.
+Today, publishing an already-compiled ARM JSON module reads and uploads its bytes directly. This proposal adds validation only when that artifact contains `_module`: a missing object remains a no-op, while a present object must satisfy the closed canonical schema. A valid artifact is published without metadata normalization, rewrite, or template-hash adjustment; an invalid object is rejected before publication. The options must not relabel an already-compiled module.
 
-During a consumer build, the existing ARM JSON writer preserves each restored module's top-level metadata when it is embedded in `Microsoft.Resources/deployments.properties.template`. Consumer CLI values describe only the consumer entry point and must not overwrite those objects. Consumer builds do not validate, normalize, remove, or otherwise rewrite `_module`: an older compiler must preserve future types, fields, and version formats that it does not understand.
+During a consumer build, the existing ARM JSON writer preserves each restored module's top-level metadata when it is embedded in `Microsoft.Resources/deployments.properties.template`. Consumer CLI values describe only the consumer entry point and must not overwrite those objects. A consumer validates every present `_module` object in restored registry templates and embedded inline nested templates against the closed canonical schema. Valid values are retained unchanged; missing objects remain untouched; invalid, unknown-type, unknown-field, or noncanonical objects fail the build without being normalized or rewritten. Future schema or type additions therefore require consumers to upgrade Bicep before they can consume artifacts that use them.
 
-External templates with no `_module` object remain supported without inferred module identification, validation failure, or any other action. A publisher that needs compiler validation must publish from Bicep source with an identity input; this REP does not add a compatibility-breaking validator for existing JSON artifacts.
+External templates with no `_module` object remain supported without inferred module identification, validation failure, or any other action. A publisher that needs compiler-generated identity must publish from Bicep source with an identity input.
 
 This contract applies recursively to inline nested templates, including nested templates already embedded inside a restored module. Reusing the same module more than once preserves its identity on each occurrence. A parent has no module identification object unless its own inputs supply one.
 
@@ -164,7 +166,7 @@ An implementation must not replace `_module.version` in already-compiled JSON. T
 | CLI input semantics | Complete tuple, partial/repeated values, and `--pattern` rejection with any identity input. |
 | JSON-RPC input semantics | `bicep/compile` `.bicep` entry point with and without the tuple, shared diagnostics and emission, and no propagation to dependencies. |
 | Emission | Metadata beside `_generator`; preserve existing metadata; absent input leaves baseline output unchanged; deterministic output and normal template-hash behavior. |
-| Publication and consumption | Source publication parity with build, compiled JSON preservation, restore and consumer build, multiple uses, transitive nested templates, unknown future metadata preservation, and no identity propagation from parents. |
+| Publication and consumption | Source publication parity with build; raw JSON publication and consumer acceptance of missing `_module`; valid canonical metadata preservation; rejection of invalid, noncanonical, unknown-type, and unknown-field metadata at registry and inline nested-template boundaries; multiple uses, transitive nested templates, and no identity propagation from parents. |
 | Compatibility and diagnostics | Supported ARM language versions, array- and object-shaped resource collections, older templates without the field, and errors that never echo rejected values. |
 
 ### Server side changes (if applicable)
@@ -246,7 +248,7 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 1. **Constrained identity versus flexibility.** Seven hex characters bound the metadata payload and reduce accidental inclusion of identifiable or sensitive free-form text in ARM or deployment telemetry, but cannot represent every publisher's identifier. A full module name would be simpler to interpret, but its flexibility is intentionally rejected; report consumers use an external `(type, id)` mapping instead. Numeric-only release versions similarly do not represent full SemVer. Explicit schema extensions are preferable to an arbitrary string escape hatch.
 1. **Explicit values versus source coupling.** Requiring the complete tuple keeps release identity independent of repository file conventions and metadata schemas, but publishing automation must supply all three values for each module.
 1. **Metadata is not provenance.** A reserved name prevents ordinary Bicep declarations from writing the field, but any caller can supply valid CLI inputs or edit ARM JSON. Format validation is neither publisher authentication nor proof that a field contains no sensitive information. Any future collector needs its own trust and validation boundary.
-1. **Artifact and compatibility costs.** Each module occurrence adds a small object and changes the compiled artifact. Existing published versions need republishing to gain this field; a consumer build cannot reliably reconstruct it. Strict rejection of malformed reserved objects must be assessed against existing JSON templates and older tooling.
+1. **Artifact and compatibility costs.** Each module occurrence adds a small object and changes the compiled artifact. Existing published versions need republishing to gain this field; a consumer build cannot reliably reconstruct it. Present malformed or future-schema `_module` objects fail publication or consumption, so consumers must upgrade before accepting future types or fields.
 
 ## Alternatives
 
@@ -260,14 +262,13 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 
 ## Rollout plan
 
-1. Implement the settled CLI and JSON-RPC input contracts, shared validator, and emission path, initially behind an experimental gate. Cover standalone Bicep build, source-based publish, `bicep/compile` JSON-RPC, and consumer preservation together.
+1. Implement the settled CLI and JSON-RPC input contracts, shared validator, and emission path, initially behind an experimental gate. Cover standalone Bicep build, source-based publication, raw JSON publication validation, `bicep/compile` JSON-RPC, consumer validation, and valid metadata preservation together.
 1. Pilot publisher and consumer workflows, including AVM modules, without claiming that template metadata is being collected or surfaced.
 1. Stabilize the standalone Bicep input/output contract and document its minimum version. Do not remove any existing AVM telemetry mechanism merely because this field is available.
 1. Deliver Azure CLI and Azure PowerShell named-parameter support as follow-up parity work. It does not block standalone Bicep adoption or the initial GA of this feature.
 
 ## Unresolved questions
 
-1. How, if at all, should a publisher validate or document a hand-authored compiled JSON module that already contains `_module`, without making consumer builds reject or rewrite it?
 1. What are the required opt-out semantics before any future telemetry collection is enabled? Compile-time identity is static and cannot be conditioned on a deployment parameter such as AVM's existing `enableTelemetry`.
 1. What preservation behavior is required across older Bicep versions, decompilation/recompilation, template specs, and alternative module artifact formats? The initial inline-template contract must not imply these paths are already covered.
 
