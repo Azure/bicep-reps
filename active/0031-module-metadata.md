@@ -21,7 +21,7 @@ Introduce an optional module reference input that Bicep emits as a reserved `met
 }
 ```
 
-The CLI input is `--module-ref`; the equivalent `bicep/compile` JSON-RPC input is an optional `module` object with one `reference` property. A normal build with no input emits no `_module` object and remains unchanged. A source-based `bicep publish` defaults the compiler input to its resolved `--target` value when `--module-ref` is omitted.
+The CLI input is `--module-ref`; the equivalent `bicep/compile` JSON-RPC input is an optional `module` object with one `reference` property. A normal build with no input emits no `_module` object and remains unchanged. A source-based `bicep publish` requires `--module-ref` and never derives identity metadata from `--target`.
 
 Existing compiled JSON without `_module` remains unchanged. When `_module` is present, publication and consumption validate its closed canonical schema before preserving it in the resulting template.
 
@@ -88,7 +88,7 @@ When an effective module reference is present and valid, Bicep emits exactly thi
 
 The object is a property of the template's existing `metadata` object, alongside `_generator`, `name`, and `description`. It is not part of `_generator`, a resource's `tags`, or the deployment resource's own metadata.
 
-Each template has at most one `_module` object describing that template's module. Dependencies retain their own objects; there is no flattened list on the parent. A normal build with no `--module-ref` emits no object, inferred default, or other new metadata. Source-based `publish` is the exception: because it already requires `--target`, an omitted `--module-ref` uses that resolved target as the effective reference for the source compilation.
+Each template has at most one `_module` object describing that template's module. Dependencies retain their own objects; there is no flattened list on the parent. A normal build with no `--module-ref` emits no object, inferred default, or other new metadata. Source-based `publish` requires `--module-ref`; omitting it fails before compilation and does not infer a reference from `--target`.
 
 The name is reserved for the compiler. Ordinary Bicep `metadata` declarations cannot author or override `_module`. This REP does not relax the existing reserved-name restriction.
 
@@ -124,20 +124,9 @@ An OCI reference can contain organization- or publisher-identifying registry, re
 
 #### Compilation, publishing, and consumption
 
-When `--module-ref` is supplied for build or source publish, Bicep resolves it and emits the effective reference through the normal template emitter before final template hashing.
+For a build with `--module-ref`, or for source publish where the option is required, Bicep resolves the input and emits the effective reference through the normal template emitter before final template hashing.
 
-The current [publish command](https://github.com/Azure/bicep/blob/main/src/Bicep.Cli/Commands/PublishCommand.cs) resolves `--target` before source compilation, publishes raw ARM JSON directly, and rejects `--with-source` for JSON input. For source publication where the publication destination is also the consumer-facing reference, omitting the proposed `--module-ref` uses the resolved target during compilation:
-
-```powershell
-# Current --target and --with-source options; proposed metadata default.
-bicep publish .\main.bicep `
-  --target br:exampleregistry.azurecr.io/bicep/modules/container-app:0.1.2 `
-  --with-source
-```
-
-This emits `br:exampleregistry.azurecr.io/bicep/modules/container-app:0.1.2` as the canonical `_module.reference`. `--target` names the publication destination; `_module.reference` is the consumer-facing, resolvable OCI reference and may differ. The [public module registry documentation](https://learn.microsoft.com/azure/azure-resource-manager/bicep/modules#public-module-registry) shows this distinction: `br/public:avm/res/app/container-app:0.1.2` is the public alias for `br:mcr.microsoft.com/bicep/avm/res/app/container-app:0.1.2`.
-
-For example, an AVM publisher can publish to its publication registry while recording the public MCR address explicitly:
+The current [publish command](https://github.com/Azure/bicep/blob/main/src/Bicep.Cli/Commands/PublishCommand.cs) resolves `--target` before source compilation, publishes raw ARM JSON directly, and rejects `--with-source` for JSON input. Under this proposal, source-based `bicep publish` requires `--module-ref`:
 
 ```powershell
 # Proposed --module-ref; current --target and --with-source options.
@@ -147,7 +136,9 @@ bicep publish .\main.bicep `
   --with-source
 ```
 
-If `--module-ref` is omitted for source publish, Bicep resolves `--target` through the same resolver and uses the resulting fully qualified `br:` reference during compilation. An explicit `--module-ref` may differ from `--target`; this REP does not require them to match. The target default is a generic convenience when those addresses are the same; it is not sufficient for mirror or publication destinations, such as AVM's, that differ from the consumer-facing reference. The effective reference is compilation metadata, not an authored source declaration. `--with-source` continues to archive Bicep source; this REP does not define an archive format.
+`--target` names the publication destination; `--module-ref` is the consumer-facing, resolvable OCI reference and may differ. In the example, the emitted canonical `_module.reference` is `br:mcr.microsoft.com/bicep/avm/res/app/container-app:0.1.2`. The [public module registry documentation](https://learn.microsoft.com/azure/azure-resource-manager/bicep/modules#public-module-registry) shows this distinction: `br/public:avm/res/app/container-app:0.1.2` is the public alias for `br:mcr.microsoft.com/bicep/avm/res/app/container-app:0.1.2`.
+
+Source publish without `--module-ref` fails before compilation; Bicep never derives `_module.reference` from `--target`. The effective reference is compilation metadata, not an authored source declaration. `--with-source` continues to archive Bicep source; this REP does not define an archive format.
 
 The feature must not be implemented as a post-build text replacement. The current [template writer](https://github.com/Azure/bicep/blob/main/src/Bicep.Core/Emit/TemplateWriter.cs) computes `metadata._generator.templateHash` from the generated template before inserting the hash value itself. Emitting `_module` before that calculation gives each generated artifact a hash that matches its own content. Adding or changing `_module` therefore produces a different valid template hash; it does not leave a hash valid for prior content.
 
@@ -165,7 +156,7 @@ Current Bicep rejects `--with-source` for a JSON input. Supplying `--module-ref`
 
 During a consumer build, the existing ARM JSON writer preserves each restored module's top-level metadata when it is embedded in `Microsoft.Resources/deployments.properties.template`. A consumer validates every present `_module` object in restored registry templates and embedded inline nested templates against the closed canonical schema. Valid values are retained unchanged; missing objects remain untouched; invalid, unknown-field, or noncanonical objects fail the build without being normalized or rewritten. Future schema additions require consumers to upgrade Bicep before they can consume artifacts that use them.
 
-External templates with no `_module` object remain supported without inferred module identification, validation failure, or any other action. Reusing the same module more than once preserves its identity on each occurrence. A parent has no module identification object unless its own build input or source publish target supplies one.
+External templates with no `_module` object remain supported without inferred module identification, validation failure, or any other action. Reusing the same module more than once preserves its identity on each occurrence. A parent has no module identification object unless its own build or source-publish input supplies one.
 
 There are no new deployment parameters, resources, resource tags, or runtime expressions.
 
@@ -174,10 +165,10 @@ There are no new deployment parameters, resources, resource tags, or runtime exp
 | Area | Required cases |
 | --- | --- |
 | Reference resolution | Fully qualified tagged and digest references; configured aliases resolving to a fully qualified emitted value; invalid syntax; parser component limits; no registry call for validation. |
-| CLI input semantics | Build with and without `--module-ref`; repeated option; `--pattern` rejection with the option; source publish explicit override and target default; pre-compiled JSON rejection of the option. |
+| CLI input semantics | Build with and without `--module-ref`; repeated option; `--pattern` rejection with the option; source publish requires an explicit reference and does not derive one from `--target`; pre-compiled JSON rejection of the option. |
 | JSON-RPC input semantics | `bicep/compile` `.bicep` entry point with and without `module.reference`, shared diagnostics and emission, and no propagation to dependencies. |
-| Emission | Metadata beside `_generator`; absent normal-build input leaves baseline output unchanged; source-publish target default; deterministic output and normal template-hash behavior. |
-| Publication and consumption | Source publication with `--with-source` and explicit or target-default reference; raw JSON publication and consumer acceptance of missing `_module`; valid canonical metadata preservation; rejection of invalid, aliased, or noncanonical metadata at registry and inline nested-template boundaries; multiple uses, transitive nested templates, and no identity propagation from parents. |
+| Emission | Metadata beside `_generator`; absent normal-build input leaves baseline output unchanged; explicit source-publish reference; deterministic output and normal template-hash behavior. |
+| Publication and consumption | Source publication with `--with-source` and an explicit reference; raw JSON publication and consumer acceptance of missing `_module`; valid canonical metadata preservation; rejection of invalid, aliased, or noncanonical metadata at registry and inline nested-template boundaries; multiple uses, transitive nested templates, and no identity propagation from parents. |
 | Compatibility and diagnostics | Supported ARM language versions, array- and object-shaped resource collections, older templates without the field, errors that never echo rejected values, and upgrade requirements for future schema additions. |
 
 #### Initial compatibility scope
@@ -257,7 +248,7 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 ## Tradeoffs
 
 1. **Registry reference and privacy.** A reference carries a directly interpretable module location and version, but registry, repository, and tag text can identify organizations or contain publisher-chosen text. OCI syntax validation limits malformed input but is not a privacy, provenance, or safety guarantee.
-1. **Target default versus explicit override.** Defaulting source publish to `--target` avoids repeating the reference when publication and consumer addresses are the same. An explicit `--module-ref` is required when they differ, such as an AVM publication registry and its consumer-facing MCR address; it is deliberately not required to match the publication target.
+1. **Explicit publish reference versus destination inference.** Requiring `--module-ref` for source publish removes a convenience when publication and consumer addresses happen to match, but prevents treating a publication destination as the consumer-facing identity. The reference is deliberately not required to match `--target`.
 1. **Artifact and compatibility costs.** Each module occurrence adds a small object and changes the compiled artifact. Present malformed or future-schema `_module` objects fail publication or consumption, so consumers must upgrade before accepting future schema additions.
 
 ## Alternatives
@@ -268,7 +259,7 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 
 ## Rollout plan
 
-1. Implement the settled CLI and JSON-RPC input contracts, shared OCI resolution and validation, and emission path, initially behind an experimental gate. Cover standalone Bicep build, source-based publication with target default and `--with-source`, raw JSON publication validation, `bicep/compile` JSON-RPC, consumer validation, and valid metadata preservation together.
+1. Implement the settled CLI and JSON-RPC input contracts, shared OCI resolution and validation, and emission path, initially behind an experimental gate. Cover standalone Bicep build, source-based publication with an explicit reference and `--with-source`, raw JSON publication validation, `bicep/compile` JSON-RPC, consumer validation, and valid metadata preservation together.
 1. Pilot publisher and consumer workflows, including AVM modules, without claiming that template metadata is being collected or surfaced.
 1. Stabilize the standalone Bicep input/output contract and document its minimum version.
 1. Coordinate AVM adoption and migration separately: static module reference metadata makes the legacy active telemetry mechanism and `enableTelemetry` parameter redundant, so they are intended to be retired rather than retained indefinitely. This compiler REP neither removes those AVM parameters or resources nor requires their immediate removal before future ARM availability.
