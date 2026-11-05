@@ -138,7 +138,7 @@ When a complete identity tuple is supplied, the publisher workflow is:
 
 The feature must not be implemented as a post-build text replacement. The current [template writer](https://github.com/Azure/bicep/blob/2cba03c71c174ea3c811a1c7a7d8e22ec45d98fa/src/Bicep.Core/Emit/TemplateWriter.cs) computes `metadata._generator.templateHash` from the generated template before inserting the hash value itself. Emitting `_module` before that calculation gives each generated artifact a hash that matches its own content. Adding or changing `_module` therefore produces a different valid template hash; it does not leave a hash valid for the prior content.
 
-`bicep publish` can compile Bicep source directly, then publish the emitted template. This draft proposes the same direct tuple for source-based `publish`, scoped to the module being published. The validator and emitter are shared, not reimplemented in command handlers.
+`bicep publish` can compile Bicep source directly, then publish the emitted template. Source-based `publish` retains the named `--module-type`, `--module-id`, and `--module-version` tuple, scoped to the module being published. The validator and emitter are shared, not reimplemented in command handlers.
 
 The proposed source-based command is:
 
@@ -146,6 +146,8 @@ The proposed source-based command is:
 # Proposed identity flags; not supported by Bicep today.
 bicep publish .\main.bicep --target br:exampleregistry.azurecr.io/bicep/modules/container-app:0.1.2 --module-type avm --module-id abcdef0 --module-version 0.1.2 --with-source
 ```
+
+The optional generic tuple must work with the existing source-based `--with-source` option so AVM retains its source archive. It remains a compiler input, not an authored Bicep metadata declaration. This REP does not define a source-archive format or extend `--with-source` to pre-compiled JSON publishing.
 
 `bicep publish` also currently accepts a pre-compiled ARM JSON input. The following two-step alternative uses proposed identity flags only on `build`, then uses the current JSON publication capability without identity flags or `--with-source`:
 
@@ -187,7 +189,7 @@ An implementation must not replace `_module.version` in already-compiled JSON. T
 | CLI input semantics | Complete tuple, partial/repeated values, and `--pattern` rejection with any identity input. |
 | JSON-RPC input semantics | `bicep/compile` `.bicep` entry point with and without the tuple, shared diagnostics and emission, and no propagation to dependencies. |
 | Emission | Metadata beside `_generator`; preserve existing metadata; absent input leaves baseline output unchanged; deterministic output and normal template-hash behavior. |
-| Publication and consumption | Source publication parity with build; raw JSON publication and consumer acceptance of missing `_module`; valid canonical metadata preservation; rejection of invalid, noncanonical, unknown-type, and unknown-field metadata at registry and inline nested-template boundaries; multiple uses, transitive nested templates, and no identity propagation from parents. |
+| Publication and consumption | Source publication parity with build, including `bicep publish --with-source` with the complete identity tuple; raw JSON publication and consumer acceptance of missing `_module`; valid canonical metadata preservation; rejection of invalid, noncanonical, unknown-type, and unknown-field metadata at registry and inline nested-template boundaries; multiple uses, transitive nested templates, and no identity propagation from parents. |
 | Compatibility and diagnostics | Supported ARM language versions, array- and object-shaped resource collections, older templates without the field, and errors that never echo rejected values. |
 
 #### Initial compatibility scope
@@ -295,9 +297,7 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 
 ## Unresolved questions
 
-1. Should source-based `bicep publish` retain the identity tuple, or should publishing require an earlier Bicep build? Source publish retains one-step compilation and `--with-source`; pre-compiled JSON publication avoids publish identity flags but cannot use `--with-source` without a separate enhancement.
-
-Additional preservation paths are deferred.
+None for the initial scope; additional preservation paths are deferred.
 
 ## Out of scope
 
