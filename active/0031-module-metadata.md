@@ -9,18 +9,18 @@ Feature Status: "Not implemented (draft proposal)"
 
 ## Summary
 
-Introduce module-generic build inputs that Bicep validates and emits into a reserved `metadata._module` object in the compiled ARM template. The object contains `type`, `code`, and `version`. Module publishers can provide the values through explicit CLI options or an explicitly selected metadata file. Published modules retain their own metadata when embedded in a consuming template.
+Introduce module-generic build inputs that Bicep validates and emits into a reserved `metadata._module` object in the compiled ARM template. The object contains `type`, `id`, and `version`. Module publishers can provide the values through explicit CLI options or an explicitly selected metadata file. Published modules retain their own metadata when embedded in a consuming template.
 
 The initial supported module type is `avm`, but the input contract and CLI names are generic. This REP covers supplying, validating, emitting, and preserving the data. How that data is subsequently surfaced or collected is intentionally unspecified.
 
-This is an initial design draft. Proposed CLI names, file discovery rules, and validation details below are subject to review; they are not existing Bicep capabilities.
+This is an initial design draft. Proposed CLI names, file-selection rules, and validation details below are subject to review; they are not existing Bicep capabilities.
 
 ## Terms and definitions
 
 | Term | Meaning |
 | --- | --- |
 | Module type | An allowlisted module classification, initially `avm` for Azure Verified Modules. Not an ARM resource type. |
-| Module code | A publisher-assigned, opaque identifier for a module within a module type. It is not a registry address, resource name, or customer identifier. |
+| Module identifier | A publisher-assigned, opaque identifier for a module within a module type. It is not a registry address, resource name, or customer identifier. |
 | Module version | The release version of the module, not the Bicep compiler version or ARM `contentVersion`. |
 | Publisher build | Compilation of a module before its compiled template is distributed or published to a registry. |
 | Consumer build | Compilation of a template that references an already-published module. |
@@ -58,7 +58,7 @@ When module identification inputs are present and valid, Bicep emits exactly thi
 {
   "_module": {
     "type": "avm",
-    "code": "abcdef0",
+    "id": "abcdef0",
     "version": "v0.1.2"
   }
 }
@@ -78,7 +78,7 @@ Proposed file shape:
 {
   "module": {
     "type": "avm",
-    "code": "abcdef0",
+    "id": "abcdef0",
     "version": "v0.1.2"
   }
 }
@@ -112,7 +112,7 @@ Proposed syntax:
 ```powershell
 bicep build .\main.bicep `
   --module-type avm `
-  --module-code abcdef0 `
+  --module-id abcdef0 `
   --module-version v0.1.2
 ```
 
@@ -120,7 +120,7 @@ All three options are module-generic. There is no `--avm-*` option, and the CLI 
 
 Without `--module-metadata-file`, the options form one atomic input: supply all three or none. Each option may occur only once. Values are literal strings; they are not Bicep expressions, environment-variable references, file contents, or values taken from deployment parameters.
 
-With `--module-metadata-file`, the selected file supplies the complete object and `--module-type` or `--module-code` are rejected. `--module-version` is permitted as the only targeted override: it replaces the file's `module.version` before the complete resulting object is validated. This lets publishing automation supply the release version without duplicating stable type and code values. A partial direct tuple, an invalid override, or a combination outside these rules fails without falling back to another source.
+With `--module-metadata-file`, the selected file supplies the complete object and `--module-type` or `--module-id` are rejected. `--module-version` is permitted as the only targeted override: it replaces the file's `module.version` before the complete resulting object is validated. This lets publishing automation supply the release version without duplicating stable type and identifier values. A partial direct tuple, an invalid override, or a combination outside these rules fails without falling back to another source.
 
 CLI values and a selected metadata file apply only to the single entry point selected for that invocation. They never relabel referenced local or registry modules. `--pattern` is rejected when any module identity option is present, even if it happens to select one file, so behavior is deterministic.
 
@@ -131,18 +131,18 @@ The same validator is used for file inputs and CLI inputs. No field may be null,
 | Attribute | Proposed validation | Emitted value |
 | --- | --- | --- |
 | `type` | String; exactly `avm` in the initial release. Reject unknown values rather than accepting arbitrary classification text. | `avm` |
-| `code` | String; exactly seven ASCII hexadecimal characters, matching `^[0-9A-Fa-f]{7}$`. No prefix, separators, paths, or URLs. | Lowercase seven-character string. |
+| `id` | String; exactly seven ASCII hexadecimal characters, matching `^[0-9A-Fa-f]{7}$`. No prefix, separators, paths, or URLs. | Lowercase seven-character string. |
 | `version` | String; numeric release core `MAJOR.MINOR.PATCH`, optionally prefixed by lowercase `v`. Each component is an integer from 0 through 2147483647, without leading zeroes except the value `0`. | Canonical `vMAJOR.MINOR.PATCH`, matching the preferred output shape. |
 
 For version input, the lexical form is `^v?(0|[1-9][0-9]{0,9})\.(0|[1-9][0-9]{0,9})\.(0|[1-9][0-9]{0,9})$`, followed by the numeric range checks. Matching is against the entire string, with no trailing newline accepted.
 
 This version grammar deliberately supports only the numeric release core of SemVer, with an optional input prefix. It does not claim to implement full SemVer: prerelease and build-metadata identifiers are rejected in this draft because they allow arbitrary text. Whether to support a constrained prerelease form, and whether to emit the `v` prefix, must be resolved before stabilization.
 
-The schema is closed: exactly `type`, `code`, and `version` are required, with no additional properties. A future module type requires an explicit allowlist/schema change, not a way to bypass validation.
+The schema is closed: exactly `type`, `id`, and `version` are required, with no additional properties. A future module type requires an explicit allowlist/schema change, not a way to bypass validation.
 
-Diagnostics identify the input source, attribute, and violated rule without echoing the rejected value or the complete metadata object. A URL or accidental secret supplied instead of a code or version must not be repeated in diagnostics. An invalid input produces a non-zero exit code and no successful template emission; an existing output file must not be presented as the result of that failed build.
+Diagnostics identify the input source, attribute, and violated rule without echoing the rejected value or the complete metadata object. A URL or accidental secret supplied instead of an identifier or version must not be repeated in diagnostics. An invalid input produces a non-zero exit code and no successful template emission; an existing output file must not be presented as the result of that failed build.
 
-Module code assignment and uniqueness remain the module publisher's responsibility. The compiler does not resolve a code through a catalog, derive it from a registry address, or check its uniqueness online.
+Module identifier assignment and uniqueness within a module type remain the module publisher's responsibility. The compiler does not resolve an identifier through a catalog, derive it from a registry address, or check its uniqueness online.
 
 #### Compilation, publishing, and consumption
 
@@ -180,9 +180,9 @@ An implementation must not replace `_module.version` in already-compiled JSON. T
 | Area | Required cases |
 | --- | --- |
 | Attribute validation | Accepted type, unknown type, missing/extra attributes, wrong JSON types, duplicate keys, nulls, whitespace, and case handling. |
-| Code | Exactly seven hex characters; reject six/eight characters, non-ASCII lookalikes, prefixes, separators, and embedded newlines. Verify lowercase normalization. |
+| Identifier | Exactly seven hex characters; reject six/eight characters, non-ASCII lookalikes, prefixes, separators, and embedded newlines. Verify lowercase normalization. |
 | Version | Optional input prefix, canonical output, zero components, leading zeroes, component bounds, overlong values, prerelease/build rejection, and no trailing newline. |
-| File selection and precedence | No file read without the option, malformed/unreadable selected file, missing `module`, no helper-module propagation, selected-file plus version override, rejected file plus type/code options, partial/repeated CLI inputs, and `--pattern` rejection with any identity input. |
+| File selection and precedence | No file read without the option, malformed/unreadable selected file, missing `module`, no helper-module propagation, selected-file plus version override, rejected file plus type/id options, partial/repeated CLI inputs, and `--pattern` rejection with any identity input. |
 | Emission | Metadata beside `_generator`; preserve existing metadata; absent input leaves baseline output unchanged; deterministic output and normal template-hash behavior. |
 | Publication and consumption | Source publication parity with build, compiled JSON preservation, restore and consumer build, multiple uses, transitive nested templates, unknown future metadata preservation, and no identity propagation from parents. |
 | Dependency tracking | Selected-file addition, modification, and removal invalidate cached compilation through the auxiliary-file mechanism; no stale metadata survives incremental builds. |
@@ -200,7 +200,7 @@ None proposed for carrying the object in existing template metadata.
 
 ### Examples
 
-These are proposed output excerpts, not complete deployable templates. The module code and release version are illustrative and are not asserted to be assigned to the Container App module.
+These are proposed output excerpts, not complete deployable templates. The module identifier and release version are illustrative and are not asserted to be assigned to the Container App module.
 
 #### Container App module compiled by its publisher
 
@@ -216,7 +216,7 @@ The existing [Container App compiled template](https://github.com/Azure/bicep-re
     },
     "_module": {
       "type": "avm",
-      "code": "abcdef0",
+      "id": "abcdef0",
       "version": "v0.1.2"
     },
     "name": "Container Apps",
@@ -247,7 +247,7 @@ For a consumer using language version `2.0` and symbolic resource names, the cor
             },
             "_module": {
               "type": "avm",
-              "code": "abcdef0",
+              "id": "abcdef0",
               "version": "v0.1.2"
             },
             "name": "Container Apps",
@@ -271,8 +271,8 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 
 ## Alternatives
 
-1. **An integer code.** A bounded non-negative integer could further narrow representation and avoid hexadecimal case normalization. It remains a viable alternative, but this draft proposes seven hexadecimal characters. Changing to an integer would require a decision on its JSON type, bounds, and assignment/migration policy.
-1. **AVM-specific options or an implicit type.** Shorter for the initial adopter but couples a general compiler interface to one module system. Generic `--module-type`, `--module-code`, and `--module-version` inputs and an explicit allowlisted type keep the interface extensible.
+1. **An integer identifier.** A bounded non-negative integer could further narrow representation and avoid hexadecimal case normalization. It remains a viable alternative, but this draft proposes seven hexadecimal characters. Changing to an integer would require a decision on its JSON type, bounds, and assignment/migration policy.
+1. **AVM-specific options or an implicit type.** Shorter for the initial adopter but couples a general compiler interface to one module system. Generic `--module-type`, `--module-id`, and `--module-version` inputs and an explicit allowlisted type keep the interface extensible.
 1. **Ordinary Bicep metadata declarations.** No new input mechanism would be needed, but release automation would have to modify source and the reserved schema would not be enforced as a compiler-managed contract. Descriptive user metadata remains available for other purposes.
 1. **Put module identification inside `_generator`.** That conflates module identity with compiler identity. A sibling `_module` object keeps their lifecycles and meanings separate.
 1. **Derive identity from a registry reference.** Registry hosts, repository paths, aliases, and tags are not a constrained opaque identity and can change through mirroring or republishing. This also fails to cover locally compiled modules.
@@ -289,8 +289,8 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 ## Unresolved questions
 
 1. Is `--module-metadata-file` the preferred option name, and how should editor/RPC callers supply the equivalent explicit file input?
-1. Are `--module-type`, `--module-code`, and `--module-version` the preferred names, and should source-based `publish` expose the same file-plus-version-override behavior directly?
-1. Is a seven-character hexadecimal code the right long-term representation, or should the contract use a bounded integer? What assignment process prevents accidental code reuse within a type?
+1. Are `--module-type`, `--module-id`, and `--module-version` the preferred names, and should source-based `publish` expose the same file-plus-version-override behavior directly?
+1. Is a seven-character hexadecimal identifier the right long-term representation, or should the contract use a bounded integer? What assignment process prevents accidental identifier reuse within a type?
 1. Should version output retain the preferred `v` prefix or use unprefixed SemVer? Are prerelease versions required initially, and if so, what bounded grammar avoids arbitrary identifiers? Are the proposed numeric bounds appropriate?
 1. How should a publisher validate or document a hand-authored compiled JSON module without making consumer builds reject or rewrite it?
 1. What are the required opt-out semantics before any future telemetry collection is enabled? Compile-time identity is static and cannot be conditioned on a deployment parameter such as AVM's existing `enableTelemetry`.
@@ -300,7 +300,7 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 
 - Telemetry collection, transmission, storage, querying, reporting, or its eventual presentation.
 - Changes to existing AVM deployment telemetry, opt-out behavior, or a migration away from that mechanism.
-- Publisher authentication, signed provenance, online catalog lookups, and enforcement of module-code ownership.
+- Publisher authentication, signed provenance, online catalog lookups, and enforcement of module identifier ownership.
 - Support for module types other than `avm` in the initial release.
 - Changes to ARM resource tags, deployment resources used for existing telemetry, or resource provider behavior.
 - A generic mechanism for copying arbitrary repository metadata into ARM templates.
