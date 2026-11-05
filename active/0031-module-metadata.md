@@ -34,6 +34,8 @@ Module publishers need a small, consistent way to identify a module and its vers
 
 Embedding the validated identity in compiled ARM JSON carries it through build, artifact, and deployment workflows to ARM, where it is available to read during deployment. This avoids relying on source-only metadata, CLI state, or an external sidecar that may be absent from the deployment payload. This REP defines availability only: it does not define an ARM reader, collection, interpretation, transmission, storage, or surfacing mechanism.
 
+Embedding static module identity requires no feature-specific deployment opt-out. Any future ARM collection or handling follows applicable ARM platform behavior and policies, not a policy defined here. A deployment-command flag can be considered separately if it is later needed.
+
 Release information is often held by publishing automation rather than authored in the Bicep source. Explicit build inputs let release pipelines supply it without adding publisher-specific syntax to the Bicep language.
 
 The intended outcome is a bounded, machine-readable metadata contract, not an instruction to transmit telemetry or a claim that the module's publisher has been authenticated.
@@ -264,21 +266,21 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 
 1. Implement the settled CLI and JSON-RPC input contracts, shared validator, and emission path, initially behind an experimental gate. Cover standalone Bicep build, source-based publication, raw JSON publication validation, `bicep/compile` JSON-RPC, consumer validation, and valid metadata preservation together.
 1. Pilot publisher and consumer workflows, including AVM modules, without claiming that template metadata is being collected or surfaced.
-1. Stabilize the standalone Bicep input/output contract and document its minimum version. Do not remove any existing AVM telemetry mechanism merely because this field is available.
+1. Stabilize the standalone Bicep input/output contract and document its minimum version.
+1. Coordinate AVM adoption and migration separately: static module identity makes the legacy active telemetry mechanism and `enableTelemetry` parameter redundant, so they are intended to be retired rather than retained indefinitely. This compiler REP neither removes those AVM parameters or resources nor requires their immediate removal before future ARM availability.
 1. Deliver Azure CLI and Azure PowerShell named-parameter support as follow-up parity work. It does not block standalone Bicep adoption or the initial GA of this feature.
 
 ## Unresolved questions
 
-1. What are the required opt-out semantics before any future telemetry collection is enabled? Compile-time identity is static and cannot be conditioned on a deployment parameter such as AVM's existing `enableTelemetry`.
 1. What preservation behavior is required across older Bicep versions, decompilation/recompilation, template specs, and alternative module artifact formats? The initial inline-template contract must not imply these paths are already covered.
 
 ## Out of scope
 
 - Telemetry collection, transmission, storage, querying, reporting, or its eventual presentation.
-- Changes to existing AVM deployment telemetry, opt-out behavior, or a migration away from that mechanism.
+- Implementing the separately coordinated AVM migration that retires legacy active telemetry and its `enableTelemetry` parameter.
 - Publisher authentication, signed provenance, online catalog lookups, and enforcement of module identifier ownership.
 - Support for module types other than `avm` in the initial release.
-- Changes to ARM resource tags, deployment resources used for existing telemetry, or resource provider behavior.
+- Changes to ARM resource tags, deployment resources, or parameters used by legacy AVM active telemetry, or to resource provider behavior.
 - A generic mechanism for copying arbitrary repository metadata into ARM templates.
 
 ## Input mechanisms considered
