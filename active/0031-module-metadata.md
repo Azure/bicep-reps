@@ -244,6 +244,7 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 ## Alternatives
 
 1. **An integer identifier.** A bounded non-negative integer could further narrow representation and avoid hexadecimal case normalization. It remains a viable alternative, but this draft proposes seven hexadecimal characters. Changing to an integer would require a decision on its JSON type, bounds, and assignment/migration policy.
+1. **Seven ASCII alphanumeric characters.** A seven-character ASCII `[0-9A-Za-z]` identifier would retain the bounded length while increasing the assignment space to `36^7` (78,364,164,096) if case-insensitive, or `62^7` (3,521,614,606,208) if case-sensitive. It also admits more readable names and account-like identifiers, so it has a privacy tradeoff that requires review rather than equivalent-safety assumptions. A chosen alphabet must explicitly define case sensitivity and canonicalization, exclude Unicode `\w` characters, and retain publisher-side uniqueness checks; it does not add a compiler catalog lookup.
 1. **AVM-specific options or an implicit type.** Shorter for the initial adopter but couples a general compiler interface to one module system. Generic `--module-type`, `--module-id`, and `--module-version` inputs and an explicit allowlisted type keep the interface extensible.
 1. **Ordinary Bicep metadata declarations.** No new input mechanism would be needed, but release automation would have to modify source and the reserved schema would not be enforced as a compiler-managed contract. Descriptive user metadata remains available for other purposes.
 1. **Put module identification inside `_generator`.** That conflates module identity with compiler identity. A sibling `_module` object keeps their lifecycles and meanings separate.
@@ -261,7 +262,7 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 ## Unresolved questions
 
 1. Are `--module-type`, `--module-id`, and `--module-version` the preferred names, and how should editor/RPC callers supply the equivalent tuple?
-1. Is a seven-character hexadecimal identifier the right long-term representation, or should the contract use a bounded integer? What assignment process prevents accidental identifier reuse within a type?
+1. Is a seven-character hexadecimal identifier the right long-term representation, or should the contract use a bounded integer or seven ASCII alphanumeric characters? If alphanumeric, should matching be case-sensitive, and what canonical form prevents duplicate assignment within a type?
 1. Should version output retain the preferred `v` prefix or use unprefixed SemVer? Are prerelease versions required initially, and if so, what bounded grammar avoids arbitrary identifiers? Are the proposed numeric bounds appropriate?
 1. How should a publisher validate or document a hand-authored compiled JSON module without making consumer builds reject or rewrite it?
 1. What are the required opt-out semantics before any future telemetry collection is enabled? Compile-time identity is static and cannot be conditioned on a deployment parameter such as AVM's existing `enableTelemetry`.
