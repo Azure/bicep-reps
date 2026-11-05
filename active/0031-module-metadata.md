@@ -169,7 +169,7 @@ There are no new deployment parameters, resources, resource tags, or runtime exp
 
 #### Release-version workflow
 
-The public MAR repository currently stores only `MAJOR.MINOR` in `version.json`; its release-tag script calculates the `PATCH` component from existing release tags. That script states that registry publication, including telemetry-token replacement, happens later in OneBranch pipelines. The public source reviewed here does not show whether that pipeline injects values into Bicep source or compiled JSON, so this REP does not assume either behavior.
+MAR currently stores `MAJOR.MINOR` in `version.json` and calculates `PATCH` from existing release tags. Its release workflow stamps the final version into a local publishing copy of `main.bicep`, then invokes `bicep publish` on that Bicep source. The published module is therefore freshly compiled after version insertion; the workflow does not patch compiled `main.json`.
 
 For this feature, release automation must provide the final version to a fresh Bicep compilation before template-hash generation. A source-controlled development build may use `v0.0.0` as an illustrative file value, then use `--module-version` for the release compilation. This is optional workflow guidance, not a compiler default or a new source-control requirement. It is valid for a checked-in development artifact and a published release artifact to have different module versions and different template hashes, provided each was freshly compiled and carries the hash for its own content.
 
