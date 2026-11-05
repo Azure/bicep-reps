@@ -13,8 +13,10 @@ Introduce an optional module reference input that Bicep emits as a reserved `met
 
 ```json
 {
-  "_module": {
-    "reference": "br:exampleregistry.azurecr.io/bicep/modules/container-app:0.1.2"
+  "metadata": {
+    "_module": {
+      "reference": "br:exampleregistry.azurecr.io/bicep/modules/container-app:0.1.2"
+    }
   }
 }
 ```
@@ -76,8 +78,10 @@ When an effective module reference is present and valid, Bicep emits exactly thi
 
 ```json
 {
-  "_module": {
-    "reference": "br:exampleregistry.azurecr.io/bicep/modules/container-app:0.1.2"
+  "metadata": {
+    "_module": {
+      "reference": "br:exampleregistry.azurecr.io/bicep/modules/container-app:0.1.2"
+    }
   }
 }
 ```
@@ -122,14 +126,28 @@ An OCI reference can contain organization- or publisher-identifying registry, re
 
 When `--module-ref` is supplied for build or source publish, Bicep resolves it and emits the effective reference through the normal template emitter before final template hashing.
 
-The current [publish command](https://github.com/Azure/bicep/blob/main/src/Bicep.Cli/Commands/PublishCommand.cs) resolves `--target` before source compilation, publishes raw ARM JSON directly, and rejects `--with-source` for JSON input. Source-based `bicep publish` retains `--module-ref` and the existing `--with-source` option:
+The current [publish command](https://github.com/Azure/bicep/blob/main/src/Bicep.Cli/Commands/PublishCommand.cs) resolves `--target` before source compilation, publishes raw ARM JSON directly, and rejects `--with-source` for JSON input. For source publication where the publication destination is also the consumer-facing reference, omitting the proposed `--module-ref` uses the resolved target during compilation:
+
+```powershell
+# Current --target and --with-source options; proposed metadata default.
+bicep publish .\main.bicep `
+  --target br:exampleregistry.azurecr.io/bicep/modules/container-app:0.1.2 `
+  --with-source
+```
+
+This emits `br:exampleregistry.azurecr.io/bicep/modules/container-app:0.1.2` as the canonical `_module.reference`. `--target` names the publication destination; `_module.reference` is the consumer-facing, resolvable OCI reference and may differ. The [public module registry documentation](https://learn.microsoft.com/azure/azure-resource-manager/bicep/modules#public-module-registry) shows this distinction: `br/public:avm/res/app/container-app:0.1.2` is the public alias for `br:mcr.microsoft.com/bicep/avm/res/app/container-app:0.1.2`.
+
+For example, an AVM publisher can publish to its publication registry while recording the public MCR address explicitly:
 
 ```powershell
 # Proposed --module-ref; current --target and --with-source options.
-bicep publish .\main.bicep --target br:exampleregistry.azurecr.io/bicep/modules/container-app:0.1.2 --module-ref br:exampleregistry.azurecr.io/bicep/modules/container-app:0.1.2 --with-source
+bicep publish .\main.bicep `
+  --target br:biceppublic.azurecr.io/public/bicep/avm/res/app/container-app:0.1.2 `
+  --module-ref br:mcr.microsoft.com/bicep/avm/res/app/container-app:0.1.2 `
+  --with-source
 ```
 
-If `--module-ref` is omitted for source publish, Bicep resolves `--target` through the same resolver and uses the resulting fully qualified `br:` reference during compilation. An explicit `--module-ref` may differ from `--target`; this REP does not require them to match. The effective reference is compilation metadata, not an authored source declaration. `--with-source` continues to archive Bicep source; this REP does not define an archive format.
+If `--module-ref` is omitted for source publish, Bicep resolves `--target` through the same resolver and uses the resulting fully qualified `br:` reference during compilation. An explicit `--module-ref` may differ from `--target`; this REP does not require them to match. The target default is a generic convenience when those addresses are the same; it is not sufficient for mirror or publication destinations, such as AVM's, that differ from the consumer-facing reference. The effective reference is compilation metadata, not an authored source declaration. `--with-source` continues to archive Bicep source; this REP does not define an archive format.
 
 The feature must not be implemented as a post-build text replacement. The current [template writer](https://github.com/Azure/bicep/blob/main/src/Bicep.Core/Emit/TemplateWriter.cs) computes `metadata._generator.templateHash` from the generated template before inserting the hash value itself. Emitting `_module` before that calculation gives each generated artifact a hash that matches its own content. Adding or changing `_module` therefore produces a different valid template hash; it does not leave a hash valid for prior content.
 
@@ -239,7 +257,7 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 ## Tradeoffs
 
 1. **Registry reference and privacy.** A reference carries a directly interpretable module location and version, but registry, repository, and tag text can identify organizations or contain publisher-chosen text. OCI syntax validation limits malformed input but is not a privacy, provenance, or safety guarantee.
-1. **Target default versus explicit override.** Defaulting source publish to `--target` avoids repeating the reference in the common path. An explicit `--module-ref` supports a distinct identity and is deliberately not required to match the publication target.
+1. **Target default versus explicit override.** Defaulting source publish to `--target` avoids repeating the reference when publication and consumer addresses are the same. An explicit `--module-ref` is required when they differ, such as an AVM publication registry and its consumer-facing MCR address; it is deliberately not required to match the publication target.
 1. **Artifact and compatibility costs.** Each module occurrence adds a small object and changes the compiled artifact. Present malformed or future-schema `_module` objects fail publication or consumption, so consumers must upgrade before accepting future schema additions.
 
 ## Alternatives
