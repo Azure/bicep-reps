@@ -32,6 +32,8 @@ A registry module's reference is used to restore the module during compilation. 
 
 Module publishers need a small, consistent way to identify a module and its version in the resulting template, including when nested within another template. Existing descriptive metadata such as `name` and `description` is free-form, is not a constrained identification schema, and should not be repurposed as one.
 
+Embedding the validated identity in compiled ARM JSON carries it through build, artifact, and deployment workflows to ARM, where it is available to read during deployment. This avoids relying on source-only metadata, CLI state, or an external sidecar that may be absent from the deployment payload. This REP defines availability only: it does not define an ARM reader, collection, interpretation, transmission, storage, or surfacing mechanism.
+
 Release information is often held by publishing automation rather than authored in the Bicep source. Supporting a file and explicit build inputs allows both repository-based authoring and release pipelines without adding publisher-specific syntax to the Bicep language.
 
 The intended outcome is a bounded, machine-readable metadata contract, not an instruction to transmit telemetry or a claim that the module's publisher has been authenticated.
