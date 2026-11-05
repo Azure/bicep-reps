@@ -9,7 +9,7 @@ Feature Status: "Not implemented (draft proposal)"
 
 ## Summary
 
-Introduce module-generic build inputs that Bicep validates and emits into a reserved `metadata._module` object in the compiled ARM template. The object contains `type`, `id`, and `version`. Module publishers provide the values through explicit CLI options. Published modules retain their own metadata when embedded in a consuming template.
+Introduce module-generic build inputs that Bicep validates and emits into a reserved `metadata._module` object in the compiled ARM template. The object contains `type`, `id`, and `version`. Module publishers provide the values through explicit CLI options or the equivalent JSON-RPC compile input. Published modules retain their own metadata when embedded in a consuming template.
 
 The initial supported module type is `avm`, but the input contract and CLI names are generic. This REP covers supplying, validating, emitting, and preserving the data. How that data is subsequently surfaced or collected is intentionally unspecified.
 
@@ -50,6 +50,8 @@ The current [template writer](https://github.com/Azure/bicep/blob/2cba03c71c174e
 
 Nested Bicep modules are emitted by recursively writing their semantic model. Restored ARM JSON modules use an [ARM template writer](https://github.com/Azure/bicep/blob/2cba03c71c174ea3c811a1c7a7d8e22ec45d98fa/src/Bicep.Core/Emit/ArmTemplateWriter.cs) that writes the parsed template object unchanged. Consequently, JSON-module consumption preserves unrecognized top-level metadata, including `_module`, but does not validate it. The proposal validates the closed schema only when a Bicep publisher compilation emits `_module`; consumption deliberately retains pass-through compatibility.
 
+The [CLI JSON-RPC protocol](https://github.com/Azure/bicep/blob/main/src/Bicep.Cli/Rpc/ICliJsonRpcProtocol.cs) currently exposes `bicep/compile` with a path and optional configuration path, plus `bicep/compileParams`; it has no JSON-RPC publish operation. The initial implementation must extend `bicep/compile` for `.bicep` entry points with the optional structured module tuple. It must use the shared validator and emitter, apply only to that entry point, and never propagate to referenced modules. `bicep/compileParams` produces deployment parameters rather than a module template and does not receive this input. This requires protocol and compiler coverage, not an editor UI change.
+
 #### Wrapper integration
 
 The current [Azure CLI Bicep commands](https://learn.microsoft.com/en-us/cli/azure/bicep#az-bicep-publish) expose `az bicep build` and `az bicep publish`, but do not yet expose the proposed identity options. Follow-up Azure CLI work must add named `--module-type`, `--module-id`, and `--module-version` options to both commands, forward them to Bicep, update help and tests, and enforce the minimum Bicep version that supports them with consistent unsupported-binary errors.
@@ -67,7 +69,7 @@ When module identification inputs are present and valid, Bicep emits exactly thi
   "_module": {
     "type": "avm",
     "id": "abcdef0",
-    "version": "v0.1.2"
+    "version": "0.1.2"
   }
 }
 ```
@@ -86,7 +88,7 @@ Proposed syntax:
 bicep build .\main.bicep `
   --module-type avm `
   --module-id abcdef0 `
-  --module-version v0.1.2
+  --module-version 0.1.2
 ```
 
 All three options are module-generic. There is no `--avm-*` option, and the CLI does not silently assume `avm`. The initial allowlist of one type is a validation constraint rather than an AVM-specific input interface.
@@ -95,21 +97,25 @@ The options form one atomic input: supply all three or none. Each option may occ
 
 CLI values apply only to the single entry point selected for that invocation. They never relabel referenced local or registry modules. `--pattern` is rejected when any module identity option is present, even if it happens to select one file, so behavior is deterministic.
 
+#### Input option: JSON-RPC compile request
+
+The optional `module` tuple on a `bicep/compile` request contains exactly `type`, `id`, and `version`. It has the same all-or-none validation and normalization as the CLI tuple, and an absent tuple emits no `_module` object. It is valid only when the request path is a `.bicep` entry point; it is not inherited by helper or dependency modules.
+
 #### Validation and normalization
 
-The validator applies to CLI inputs. No field may be null, empty, or contain leading or trailing whitespace. Values are strings; coercion is not allowed.
+The shared validator applies to CLI and JSON-RPC inputs. No field may be null, empty, or contain leading or trailing whitespace. Values are strings; coercion is not allowed.
 
 | Attribute | Proposed validation | Emitted value |
 | --- | --- | --- |
 | `type` | String; exactly `avm` in the initial release. Reject unknown values rather than accepting arbitrary classification text. | `avm` |
 | `id` | String; exactly seven ASCII hexadecimal characters, matching `^[0-9A-Fa-f]{7}$`. No prefix, separators, paths, or URLs. | Lowercase seven-character string. |
-| `version` | String; numeric release core `MAJOR.MINOR.PATCH`, optionally prefixed by lowercase `v`. Each component is an integer from 0 through 2147483647, without leading zeroes except the value `0`. | Canonical `vMAJOR.MINOR.PATCH`, matching the preferred output shape. |
+| `version` | String; numeric release core `MAJOR.MINOR.PATCH`, optionally prefixed by lowercase `v`. Each component is an integer from 0 through 2147483647, without leading zeroes except the value `0`. | Canonical `MAJOR.MINOR.PATCH`. |
 
 The seven-character hexadecimal identifier deliberately bounds metadata size and excludes free-form module names, URLs, customer names, and other identifying strings that could otherwise be accidentally carried in ARM or deployment telemetry. Its `16^7` (268,435,456) possible values per type provide ample space for collision-free allocation at expected catalog scale, with uniqueness enforced by the publisher. It constrains accidental exposure and payload size; it is not proof that an identifier is non-sensitive or impossible to encode identifying data.
 
 For version input, the lexical form is `^v?(0|[1-9][0-9]{0,9})\.(0|[1-9][0-9]{0,9})\.(0|[1-9][0-9]{0,9})$`, followed by the numeric range checks. Matching is against the entire string, with no trailing newline accepted.
 
-This version grammar deliberately supports only the numeric release core of SemVer, with an optional input prefix. It does not claim to implement full SemVer: prerelease and build-metadata identifiers are rejected in this draft because they allow arbitrary text. Whether to support a constrained prerelease form, and whether to emit the `v` prefix, must be resolved before stabilization.
+This initial version grammar deliberately supports only the numeric release core of SemVer. It accepts an optional lowercase input prefix and emits the unprefixed canonical form. It does not claim to implement full SemVer: prerelease and build-metadata identifiers are rejected initially because they allow arbitrary text.
 
 The schema is closed: exactly `type`, `id`, and `version` are required, with no additional properties. A future module type requires an explicit allowlist/schema change, not a way to bypass validation.
 
@@ -121,7 +127,7 @@ Module identifier assignment and uniqueness within a module type remain the modu
 
 The publisher workflow is:
 
-1. Supply release identity through the explicit CLI tuple.
+1. Supply release identity through the explicit CLI tuple, including source-based `bicep publish`, or through the equivalent JSON-RPC tuple when compiling with `bicep/compile`.
 1. Validate and normalize the values before emission.
 1. Emit `_module` through the normal template emitter alongside existing metadata, before final template hashing.
 1. Publish or otherwise distribute that compiled template without stripping the object.
@@ -144,7 +150,7 @@ There are no new deployment parameters, resources, resource tags, or runtime exp
 
 MAR currently stores `MAJOR.MINOR` in `version.json` and calculates `PATCH` from existing release tags. Its release workflow stamps the final version into a local publishing copy of `main.bicep`, then invokes `bicep publish` on that Bicep source. The published module is therefore freshly compiled after version insertion; the workflow does not patch compiled `main.json`.
 
-For this feature, release automation must provide the stable type and identifier plus the final version to a fresh Bicep compilation before template-hash generation. A development build may supply `v0.0.0` in the explicit tuple; this is optional workflow guidance, not a compiler default or a new source-control requirement. It is valid for a checked-in development artifact and a published release artifact to have different module versions and different template hashes, provided each was freshly compiled and carries the hash for its own content.
+For this feature, release automation must provide the stable type and identifier plus the final version to a fresh Bicep compilation before template-hash generation. A development build may supply `0.0.0` in the explicit tuple; this is optional workflow guidance, not a compiler default or a new source-control requirement. It is valid for a checked-in development artifact and a published release artifact to have different module versions and different template hashes, provided each was freshly compiled and carries the hash for its own content.
 
 An implementation must not replace `_module.version` in already-compiled JSON. That would leave the existing `_generator.templateHash` describing different content unless the whole template is regenerated through the compiler.
 
@@ -152,10 +158,11 @@ An implementation must not replace `_module.version` in already-compiled JSON. T
 
 | Area | Required cases |
 | --- | --- |
-| Attribute validation | Accepted type, unknown type, missing/partial/repeated CLI values, nulls, whitespace, and case handling. |
+| Attribute validation | Accepted type, unknown type, missing/partial/repeated CLI values, missing/partial JSON-RPC tuples, nulls, whitespace, and case handling. |
 | Identifier | Exactly seven hex characters; reject six/eight characters, non-ASCII lookalikes, prefixes, separators, and embedded newlines. Verify lowercase normalization. |
-| Version | Optional input prefix, canonical output, zero components, leading zeroes, component bounds, overlong values, prerelease/build rejection, and no trailing newline. |
+| Version | Accept both `0.1.2` and `v0.1.2`; emit canonical `0.1.2`; cover zero components, leading zeroes, component bounds, overlong values, prerelease/build rejection, and no trailing newline. |
 | CLI input semantics | Complete tuple, partial/repeated values, and `--pattern` rejection with any identity input. |
+| JSON-RPC input semantics | `bicep/compile` `.bicep` entry point with and without the tuple, shared diagnostics and emission, and no propagation to dependencies. |
 | Emission | Metadata beside `_generator`; preserve existing metadata; absent input leaves baseline output unchanged; deterministic output and normal template-hash behavior. |
 | Publication and consumption | Source publication parity with build, compiled JSON preservation, restore and consumer build, multiple uses, transitive nested templates, unknown future metadata preservation, and no identity propagation from parents. |
 | Compatibility and diagnostics | Supported ARM language versions, array- and object-shaped resource collections, older templates without the field, and errors that never echo rejected values. |
@@ -189,7 +196,7 @@ The existing [Container App compiled template](https://github.com/Azure/bicep-re
     "_module": {
       "type": "avm",
       "id": "abcdef0",
-      "version": "v0.1.2"
+      "version": "0.1.2"
     },
     "name": "Container Apps",
     "description": "This module deploys a Container App."
@@ -220,7 +227,7 @@ For a consumer using language version `2.0` and symbolic resource names, the cor
             "_module": {
               "type": "avm",
               "id": "abcdef0",
-              "version": "v0.1.2"
+              "version": "0.1.2"
             },
             "name": "Container Apps",
             "description": "This module deploys a Container App."
@@ -253,17 +260,13 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 
 ## Rollout plan
 
-1. Resolve CLI spelling, version grammar, and non-CLI input shape through this REP.
-1. Implement the shared validator and emission path, initially behind an experimental gate. Cover standalone Bicep build, source-based publish, and consumer preservation together.
+1. Implement the settled CLI and JSON-RPC input contracts, shared validator, and emission path, initially behind an experimental gate. Cover standalone Bicep build, source-based publish, `bicep/compile` JSON-RPC, and consumer preservation together.
 1. Pilot publisher and consumer workflows, including AVM modules, without claiming that template metadata is being collected or surfaced.
 1. Stabilize the standalone Bicep input/output contract and document its minimum version. Do not remove any existing AVM telemetry mechanism merely because this field is available.
 1. Deliver Azure CLI and Azure PowerShell named-parameter support as follow-up parity work. It does not block standalone Bicep adoption or the initial GA of this feature.
 
 ## Unresolved questions
 
-1. Are `--module-type`, `--module-id`, and `--module-version` the preferred names, and how should editor/RPC callers supply the equivalent tuple?
-1. Is a seven-character hexadecimal identifier the right long-term representation, or should the contract use a bounded integer or seven ASCII alphanumeric characters? If alphanumeric, should matching be case-sensitive, and what canonical form prevents duplicate assignment within a type?
-1. Should version output retain the preferred `v` prefix or use unprefixed SemVer? Are prerelease versions required initially, and if so, what bounded grammar avoids arbitrary identifiers? Are the proposed numeric bounds appropriate?
 1. How should a publisher validate or document a hand-authored compiled JSON module without making consumer builds reject or rewrite it?
 1. What are the required opt-out semantics before any future telemetry collection is enabled? Compile-time identity is static and cannot be conditioned on a deployment parameter such as AVM's existing `enableTelemetry`.
 1. What preservation behavior is required across older Bicep versions, decompilation/recompilation, template specs, and alternative module artifact formats? The initial inline-template contract must not imply these paths are already covered.
@@ -281,7 +284,7 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 
 These are alternatives considered during design; they are not part of the normative input contract.
 
-1. **CLI flags (chosen).** Named flags are explicit, discoverable, and scoped to one invocation entry point.
+1. **CLI flags (chosen for CLI invocation).** Named flags are explicit, discoverable, and scoped to one invocation entry point. The equivalent `bicep/compile` JSON-RPC tuple is required for compiler callers; it is not a competing discovery mechanism.
 1. **Environment variables.** They could flow through an inherited process environment, but wrapper propagation is unverified and ambient state risks identity leakage between builds.
 1. **`bicepconfig.json`.** Shared compiler configuration is available, but parent-directory discovery and inheritance could apply identity to helper modules; release version changes would also require mutating a configuration file.
 1. **A dedicated metadata file.** It is unnecessary for the current single-module publishing workflow and adds file-selection, precedence, and dependency-tracking complexity. It can be proposed separately if a concrete batch-publishing scenario requires it.
