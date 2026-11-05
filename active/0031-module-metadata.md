@@ -171,6 +171,10 @@ An implementation must not replace `_module.version` in already-compiled JSON. T
 | Publication and consumption | Source publication parity with build; raw JSON publication and consumer acceptance of missing `_module`; valid canonical metadata preservation; rejection of invalid, noncanonical, unknown-type, and unknown-field metadata at registry and inline nested-template boundaries; multiple uses, transitive nested templates, and no identity propagation from parents. |
 | Compatibility and diagnostics | Supported ARM language versions, array- and object-shaped resource collections, older templates without the field, and errors that never echo rejected values. |
 
+#### Initial compatibility scope
+
+Initial delivery covers compiler build, source-based `bicep publish`, the `bicep/compile` JSON-RPC tuple, raw JSON publication validation, and validation/preservation of existing registry and inline compiled JSON templates. Decompile/recompile behavior, template specs, and alternative module artifact formats are deferred and are not initial delivery gates. Older Bicep binaries do not gain the new inputs; consumers must upgrade Bicep before accepting artifacts that use a later `_module` type or schema.
+
 ### Server side changes (if applicable)
 
 No server-side change is required to carry descriptive metadata in the compiled template. This draft does not define a server-side interpretation of `_module`.
@@ -272,7 +276,7 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 
 ## Unresolved questions
 
-1. What preservation behavior is required across older Bicep versions, decompilation/recompilation, template specs, and alternative module artifact formats? The initial inline-template contract must not imply these paths are already covered.
+None for the initial scope; additional preservation paths are deferred.
 
 ## Out of scope
 
