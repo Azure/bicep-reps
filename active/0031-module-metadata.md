@@ -9,7 +9,7 @@ Feature Status: "Not implemented (draft proposal)"
 
 ## Summary
 
-Introduce module-generic build inputs that Bicep validates and emits into a reserved `metadata._module` object in the compiled ARM template. The object contains `type`, `id`, and `version`. Module publishers provide the values through explicit CLI options or the equivalent JSON-RPC compile input. Published modules retain their own metadata when embedded in a consuming template.
+Introduce optional module-generic build inputs that Bicep validates and emits into a reserved `metadata._module` object in the compiled ARM template. The object contains `type`, `id`, and `version`. Module publishers provide the values through explicit CLI options or the equivalent JSON-RPC compile input. If no input is supplied, Bicep creates no `_module` object and behavior remains unchanged. Published modules retain their own metadata when embedded in a consuming template.
 
 The initial supported module type is `avm`, but the input contract and CLI names are generic. This REP covers supplying, validating, emitting, and preserving the data. How that data is subsequently surfaced or collected is intentionally unspecified.
 
@@ -76,7 +76,7 @@ When module identification inputs are present and valid, Bicep emits exactly thi
 
 The object is a property of the template's existing `metadata` object, alongside `_generator`, `name`, and `description`. It is not part of `_generator`, a resource's `tags`, or the deployment resource's own metadata.
 
-Each template has at most one `_module` object describing that template's module. Dependencies retain their own objects; there is no flattened list on the parent. If there are no inputs, the compiler omits the object rather than emitting nulls, empty strings, or inferred defaults.
+Each template has at most one `_module` object describing that template's module. Dependencies retain their own objects; there is no flattened list on the parent. Identity input is never required: if there are no inputs, the compiler omits the object rather than emitting nulls, empty strings, inferred defaults, or any other new metadata.
 
 The name is reserved for the compiler. Ordinary Bicep `metadata` declarations cannot author or override `_module`. This REP does not relax the existing reserved-name restriction.
 
@@ -93,13 +93,13 @@ bicep build .\main.bicep `
 
 All three options are module-generic. There is no `--avm-*` option, and the CLI does not silently assume `avm`. The initial allowlist of one type is a validation constraint rather than an AVM-specific input interface.
 
-The options form one atomic input: supply all three or none. Each option may occur only once. Values are literal strings; they are not Bicep expressions, environment-variable references, file contents, or values taken from deployment parameters. A partial tuple or invalid value fails without falling back to another source.
+The options form one optional atomic input: supply all three or none. Each option may occur only once. When none are supplied, the build and output remain unchanged from today. Values are literal strings; they are not Bicep expressions, environment-variable references, file contents, or values taken from deployment parameters. A partial tuple or invalid value fails without falling back to another source.
 
 CLI values apply only to the single entry point selected for that invocation. They never relabel referenced local or registry modules. `--pattern` is rejected when any module identity option is present, even if it happens to select one file, so behavior is deterministic.
 
 #### Input option: JSON-RPC compile request
 
-The optional `module` tuple on a `bicep/compile` request contains exactly `type`, `id`, and `version`. It has the same all-or-none validation and normalization as the CLI tuple, and an absent tuple emits no `_module` object. It is valid only when the request path is a `.bicep` entry point; it is not inherited by helper or dependency modules.
+The optional `module` tuple on a `bicep/compile` request contains exactly `type`, `id`, and `version`. It has the same all-or-none validation and normalization as the CLI tuple. An absent tuple emits no `_module` object and preserves the request's existing behavior; a partial tuple fails. It is valid only when the request path is a `.bicep` entry point; it is not inherited by helper or dependency modules.
 
 #### Validation and normalization
 
@@ -125,7 +125,7 @@ Module identifier assignment and uniqueness within a module type remain the modu
 
 #### Compilation, publishing, and consumption
 
-The publisher workflow is:
+When a complete identity tuple is supplied, the publisher workflow is:
 
 1. Supply release identity through the explicit CLI tuple, including source-based `bicep publish`, or through the equivalent JSON-RPC tuple when compiling with `bicep/compile`.
 1. Validate and normalize the values before emission.
@@ -140,7 +140,7 @@ Today, publishing an already-compiled ARM JSON module reads and uploads its byte
 
 During a consumer build, the existing ARM JSON writer preserves each restored module's top-level metadata when it is embedded in `Microsoft.Resources/deployments.properties.template`. Consumer CLI values describe only the consumer entry point and must not overwrite those objects. Consumer builds do not validate, normalize, remove, or otherwise rewrite `_module`: an older compiler must preserve future types, fields, and version formats that it does not understand.
 
-External templates with no `_module` object remain supported without inferred module identification. A publisher that needs compiler validation must publish from Bicep source with an identity input; this REP does not add a compatibility-breaking validator for existing JSON artifacts.
+External templates with no `_module` object remain supported without inferred module identification, validation failure, or any other action. A publisher that needs compiler validation must publish from Bicep source with an identity input; this REP does not add a compatibility-breaking validator for existing JSON artifacts.
 
 This contract applies recursively to inline nested templates, including nested templates already embedded inside a restored module. Reusing the same module more than once preserves its identity on each occurrence. A parent has no module identification object unless its own inputs supply one.
 
@@ -267,7 +267,7 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 
 ## Unresolved questions
 
-1. How should a publisher validate or document a hand-authored compiled JSON module without making consumer builds reject or rewrite it?
+1. How, if at all, should a publisher validate or document a hand-authored compiled JSON module that already contains `_module`, without making consumer builds reject or rewrite it?
 1. What are the required opt-out semantics before any future telemetry collection is enabled? Compile-time identity is static and cannot be conditioned on a deployment parameter such as AVM's existing `enableTelemetry`.
 1. What preservation behavior is required across older Bicep versions, decompilation/recompilation, template specs, and alternative module artifact formats? The initial inline-template contract must not imply these paths are already covered.
 
