@@ -105,6 +105,8 @@ The validator applies to CLI inputs. No field may be null, empty, or contain lea
 | `id` | String; exactly seven ASCII hexadecimal characters, matching `^[0-9A-Fa-f]{7}$`. No prefix, separators, paths, or URLs. | Lowercase seven-character string. |
 | `version` | String; numeric release core `MAJOR.MINOR.PATCH`, optionally prefixed by lowercase `v`. Each component is an integer from 0 through 2147483647, without leading zeroes except the value `0`. | Canonical `vMAJOR.MINOR.PATCH`, matching the preferred output shape. |
 
+The seven-character hexadecimal identifier deliberately bounds metadata size and excludes free-form module names, URLs, customer names, and other identifying strings that could otherwise be accidentally carried in ARM or deployment telemetry. Its `16^7` (268,435,456) possible values per type provide ample space for collision-free allocation at expected catalog scale, with uniqueness enforced by the publisher. It constrains accidental exposure and payload size; it is not proof that an identifier is non-sensitive or impossible to encode identifying data.
+
 For version input, the lexical form is `^v?(0|[1-9][0-9]{0,9})\.(0|[1-9][0-9]{0,9})\.(0|[1-9][0-9]{0,9})$`, followed by the numeric range checks. Matching is against the entire string, with no trailing newline accepted.
 
 This version grammar deliberately supports only the numeric release core of SemVer, with an optional input prefix. It does not claim to implement full SemVer: prerelease and build-metadata identifiers are rejected in this draft because they allow arbitrary text. Whether to support a constrained prerelease form, and whether to emit the `v` prefix, must be resolved before stabilization.
@@ -113,7 +115,7 @@ The schema is closed: exactly `type`, `id`, and `version` are required, with no 
 
 Diagnostics identify the input source, attribute, and violated rule without echoing the rejected value or the complete metadata object. A URL or accidental secret supplied instead of an identifier or version must not be repeated in diagnostics. An invalid input produces a non-zero exit code and no successful template emission; an existing output file must not be presented as the result of that failed build.
 
-Module identifier assignment and uniqueness within a module type remain the module publisher's responsibility. The compiler does not resolve an identifier through a catalog, derive it from a registry address, or check its uniqueness online.
+Module identifier assignment and uniqueness within a module type remain the module publisher's responsibility, including detecting duplicate `(type, id)` entries in its maintained mapping at assignment time. Reporting consumers can resolve an opaque `(type, id)` to a module name through that externally maintained mapping, consistent with current AVM reporting. That lookup is not part of this compiler contract: the compiler does not resolve an identifier through a catalog, derive it from a registry address, or check its uniqueness online.
 
 #### Compilation, publishing, and consumption
 
@@ -234,7 +236,7 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 
 ## Tradeoffs
 
-1. **Constrained identity versus flexibility.** Seven hex characters and numeric-only release versions limit free-form text but cannot represent every publisher's identifier or full SemVer. Explicit schema extensions are preferable to an arbitrary string escape hatch.
+1. **Constrained identity versus flexibility.** Seven hex characters bound the metadata payload and reduce accidental inclusion of identifiable or sensitive free-form text in ARM or deployment telemetry, but cannot represent every publisher's identifier. A full module name would be simpler to interpret, but its flexibility is intentionally rejected; report consumers use an external `(type, id)` mapping instead. Numeric-only release versions similarly do not represent full SemVer. Explicit schema extensions are preferable to an arbitrary string escape hatch.
 1. **Explicit values versus source coupling.** Requiring the complete tuple keeps release identity independent of repository file conventions and metadata schemas, but publishing automation must supply all three values for each module.
 1. **Metadata is not provenance.** A reserved name prevents ordinary Bicep declarations from writing the field, but any caller can supply valid CLI inputs or edit ARM JSON. Format validation is neither publisher authentication nor proof that a field contains no sensitive information. Any future collector needs its own trust and validation boundary.
 1. **Artifact and compatibility costs.** Each module occurrence adds a small object and changes the compiled artifact. Existing published versions need republishing to gain this field; a consumer build cannot reliably reconstruct it. Strict rejection of malformed reserved objects must be assessed against existing JSON templates and older tooling.
@@ -246,7 +248,7 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 1. **Ordinary Bicep metadata declarations.** No new input mechanism would be needed, but release automation would have to modify source and the reserved schema would not be enforced as a compiler-managed contract. Descriptive user metadata remains available for other purposes.
 1. **Put module identification inside `_generator`.** That conflates module identity with compiler identity. A sibling `_module` object keeps their lifecycles and meanings separate.
 1. **Derive identity from a registry reference.** Registry hosts, repository paths, aliases, and tags are not a constrained opaque identity and can change through mirroring or republishing. This also fails to cover locally compiled modules.
-1. **Accept arbitrary metadata or full SemVer strings.** More flexible, but introduces free-form text without addressing the reason for strict attribute validation. This proposal starts with a closed object and numeric release core.
+1. **Accept arbitrary metadata, full module names, or full SemVer strings.** These would be easier to interpret or more flexible, but introduce free-form text without addressing the risk of accidentally carrying identifiable data in deployment metadata. This proposal starts with an opaque, bounded identifier, a closed object, and numeric release core.
 
 ## Rollout plan
 
