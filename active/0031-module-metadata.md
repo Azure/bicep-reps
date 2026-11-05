@@ -9,11 +9,11 @@ Feature Status: "Not implemented (draft proposal)"
 
 ## Summary
 
-Introduce module-generic build inputs that Bicep validates and emits into a reserved `metadata._module` object in the compiled ARM template. The object contains `type`, `id`, and `version`. Module publishers can provide the values through explicit CLI options or an explicitly selected metadata file. Published modules retain their own metadata when embedded in a consuming template.
+Introduce module-generic build inputs that Bicep validates and emits into a reserved `metadata._module` object in the compiled ARM template. The object contains `type`, `id`, and `version`. Module publishers provide the values through explicit CLI options. Published modules retain their own metadata when embedded in a consuming template.
 
 The initial supported module type is `avm`, but the input contract and CLI names are generic. This REP covers supplying, validating, emitting, and preserving the data. How that data is subsequently surfaced or collected is intentionally unspecified.
 
-This is an initial design draft. Proposed CLI names, file-selection rules, and validation details below are subject to review; they are not existing Bicep capabilities.
+This is an initial design draft. Proposed CLI names and validation details below are subject to review; they are not existing Bicep capabilities.
 
 ## Terms and definitions
 
@@ -34,7 +34,7 @@ Module publishers need a small, consistent way to identify a module and its vers
 
 Embedding the validated identity in compiled ARM JSON carries it through build, artifact, and deployment workflows to ARM, where it is available to read during deployment. This avoids relying on source-only metadata, CLI state, or an external sidecar that may be absent from the deployment payload. This REP defines availability only: it does not define an ARM reader, collection, interpretation, transmission, storage, or surfacing mechanism.
 
-Release information is often held by publishing automation rather than authored in the Bicep source. Supporting a file and explicit build inputs allows both repository-based authoring and release pipelines without adding publisher-specific syntax to the Bicep language.
+Release information is often held by publishing automation rather than authored in the Bicep source. Explicit build inputs let release pipelines supply it without adding publisher-specific syntax to the Bicep language.
 
 The intended outcome is a bounded, machine-readable metadata contract, not an instruction to transmit telemetry or a claim that the module's publisher has been authenticated.
 
@@ -49,8 +49,6 @@ The current [build command](https://github.com/Azure/bicep/blob/2cba03c71c174ea3
 The current [template writer](https://github.com/Azure/bicep/blob/2cba03c71c174ea3c811a1c7a7d8e22ec45d98fa/src/Bicep.Core/Emit/TemplateWriter.cs) emits `metadata._generator` before authored metadata. The [metadata symbol validator](https://github.com/Azure/bicep/blob/2cba03c71c174ea3c811a1c7a7d8e22ec45d98fa/src/Bicep.Core/Semantics/MetadataSymbol.cs) already reserves every metadata identifier beginning with `_`. `_module` should use that reserved namespace, but the compiler needs a new compilation input and emitter path; it cannot be produced as an ordinary Bicep metadata declaration.
 
 Nested Bicep modules are emitted by recursively writing their semantic model. Restored ARM JSON modules use an [ARM template writer](https://github.com/Azure/bicep/blob/2cba03c71c174ea3c811a1c7a7d8e22ec45d98fa/src/Bicep.Core/Emit/ArmTemplateWriter.cs) that writes the parsed template object unchanged. Consequently, JSON-module consumption preserves unrecognized top-level metadata, including `_module`, but does not validate it. The proposal validates the closed schema only when a Bicep publisher compilation emits `_module`; consumption deliberately retains pass-through compatibility.
-
-The [source-file grouping](https://github.com/Azure/bicep/blob/2cba03c71c174ea3c811a1c7a7d8e22ec45d98fa/src/Bicep.Core/SourceGraph/SourceFileGroupingBuilder.cs) currently tracks Bicep source files and module artifacts. Bicep also has an [auxiliary-file cache](https://github.com/Azure/bicep/blob/2cba03c71c174ea3c811a1c7a7d8e22ec45d98fa/src/Bicep.Core/SourceGraph/AuxiliaryFileCache.cs) used by `load*Content` functions. An explicitly selected metadata file should reuse that auxiliary-file tracking and invalidation model rather than create a separate cache. Non-CLI callers, such as the language server, need an equivalent explicit input rather than command-only preprocessing.
 
 #### Output contract
 
@@ -72,42 +70,7 @@ Each template has at most one `_module` object describing that template's module
 
 The name is reserved for the compiler. Ordinary Bicep `metadata` declarations cannot author or override `_module`. This REP does not relax the existing reserved-name restriction.
 
-#### Input option A: explicitly selected metadata file
-
-Proposed file shape:
-
-```json
-{
-  "module": {
-    "type": "avm",
-    "id": "abcdef0",
-    "version": "v0.1.2"
-  }
-}
-```
-
-The file is used only when selected by the proposed `--module-metadata-file <path>` option:
-
-```powershell
-bicep build .\main.bicep --module-metadata-file .\metadata.json
-```
-
-There is no automatic search for `metadata.json`, including beside the entry point, in ancestor directories, or beside referenced Bicep files. The file applies only to the invocation entry point. It never supplies identity to local helper modules or restored registry modules.
-
-Only the `module` property is an input to this feature. Existing sibling properties in a selected repository metadata file are permitted, ignored by this feature, and never copied into the ARM template. An AVM metadata file is not automatically compatible: its schema currently rejects unrecognized properties, so adopting this shape requires a coordinated AVM schema change or a separate explicitly selected file.
-
-File behavior:
-
-- Without `--module-metadata-file`, no file is read and no module identification is emitted unless a complete direct CLI tuple is supplied.
-- The selected file must contain `module`; validate its complete object against the contract below.
-- A selected file that cannot be read, contains malformed JSON or duplicate keys, or is not a JSON object: fail the build with an actionable diagnostic.
-- `module: null`, a partial object, or unknown properties inside that object: fail the build.
-
-The selected file is a tracked compilation input. Changing or removing it must invalidate affected compilation and emission caches. The compiler must not inspect arbitrary sibling files or files in the registry cache to derive module identification.
-
-Whether the option name should be `--module-metadata-file` and how non-CLI callers express the same explicit file selection remain unresolved.
-
-#### Input option B: explicit CLI values
+#### Input option: explicit CLI values
 
 Proposed syntax:
 
@@ -120,15 +83,13 @@ bicep build .\main.bicep `
 
 All three options are module-generic. There is no `--avm-*` option, and the CLI does not silently assume `avm`. The initial allowlist of one type is a validation constraint rather than an AVM-specific input interface.
 
-Without `--module-metadata-file`, the options form one atomic input: supply all three or none. Each option may occur only once. Values are literal strings; they are not Bicep expressions, environment-variable references, file contents, or values taken from deployment parameters.
+The options form one atomic input: supply all three or none. Each option may occur only once. Values are literal strings; they are not Bicep expressions, environment-variable references, file contents, or values taken from deployment parameters. A partial tuple or invalid value fails without falling back to another source.
 
-With `--module-metadata-file`, the selected file supplies the complete object and `--module-type` or `--module-id` are rejected. `--module-version` is permitted as the only targeted override: it replaces the file's `module.version` before the complete resulting object is validated. This lets publishing automation supply the release version without duplicating stable type and identifier values. A partial direct tuple, an invalid override, or a combination outside these rules fails without falling back to another source.
-
-CLI values and a selected metadata file apply only to the single entry point selected for that invocation. They never relabel referenced local or registry modules. `--pattern` is rejected when any module identity option is present, even if it happens to select one file, so behavior is deterministic.
+CLI values apply only to the single entry point selected for that invocation. They never relabel referenced local or registry modules. `--pattern` is rejected when any module identity option is present, even if it happens to select one file, so behavior is deterministic.
 
 #### Validation and normalization
 
-The same validator is used for file inputs and CLI inputs. No field may be null, empty, or contain leading or trailing whitespace. JSON values must have the stated types; coercion is not allowed.
+The validator applies to CLI inputs. No field may be null, empty, or contain leading or trailing whitespace. Values are strings; coercion is not allowed.
 
 | Attribute | Proposed validation | Emitted value |
 | --- | --- | --- |
@@ -150,14 +111,14 @@ Module identifier assignment and uniqueness within a module type remain the modu
 
 The publisher workflow is:
 
-1. Supply release identity through the explicitly selected file and optional version override, or the explicit CLI tuple.
+1. Supply release identity through the explicit CLI tuple.
 1. Validate and normalize the values before emission.
 1. Emit `_module` through the normal template emitter alongside existing metadata, before final template hashing.
 1. Publish or otherwise distribute that compiled template without stripping the object.
 
 The feature must not be implemented as a post-build text replacement. The current [template writer](https://github.com/Azure/bicep/blob/2cba03c71c174ea3c811a1c7a7d8e22ec45d98fa/src/Bicep.Core/Emit/TemplateWriter.cs) computes `metadata._generator.templateHash` from the generated template before inserting the hash value itself. Emitting `_module` before that calculation gives each generated artifact a hash that matches its own content. Adding or changing `_module` therefore produces a different valid template hash; it does not leave a hash valid for the prior content.
 
-`bicep publish` can compile Bicep source directly, then publish the emitted template. This draft proposes the same explicit file selection, direct tuple, and file-plus-version-override behavior for source-based `publish`, scoped to the module being published. The validator and emitter are shared, not reimplemented in command handlers.
+`bicep publish` can compile Bicep source directly, then publish the emitted template. This draft proposes the same direct tuple for source-based `publish`, scoped to the module being published. The validator and emitter are shared, not reimplemented in command handlers.
 
 Today, publishing an already-compiled ARM JSON module reads and uploads its bytes directly. It does not parse or validate `_module`. The compiler validates the schema when it emits `_module` from Bicep source; publishing an existing JSON artifact preserves it unchanged. The options must not relabel an already-compiled module.
 
@@ -167,13 +128,13 @@ External templates with no `_module` object remain supported without inferred mo
 
 This contract applies recursively to inline nested templates, including nested templates already embedded inside a restored module. Reusing the same module more than once preserves its identity on each occurrence. A parent has no module identification object unless its own inputs supply one.
 
-There are no new deployment parameters, resources, resource tags, or runtime expressions. Explicit file selection is a property of compilation, not a request for ARM to read a local file.
+There are no new deployment parameters, resources, resource tags, or runtime expressions.
 
 #### Release-version workflow
 
 MAR currently stores `MAJOR.MINOR` in `version.json` and calculates `PATCH` from existing release tags. Its release workflow stamps the final version into a local publishing copy of `main.bicep`, then invokes `bicep publish` on that Bicep source. The published module is therefore freshly compiled after version insertion; the workflow does not patch compiled `main.json`.
 
-For this feature, release automation must provide the final version to a fresh Bicep compilation before template-hash generation. A source-controlled development build may use `v0.0.0` as an illustrative file value, then use `--module-version` for the release compilation. This is optional workflow guidance, not a compiler default or a new source-control requirement. It is valid for a checked-in development artifact and a published release artifact to have different module versions and different template hashes, provided each was freshly compiled and carries the hash for its own content.
+For this feature, release automation must provide the stable type and identifier plus the final version to a fresh Bicep compilation before template-hash generation. A development build may supply `v0.0.0` in the explicit tuple; this is optional workflow guidance, not a compiler default or a new source-control requirement. It is valid for a checked-in development artifact and a published release artifact to have different module versions and different template hashes, provided each was freshly compiled and carries the hash for its own content.
 
 An implementation must not replace `_module.version` in already-compiled JSON. That would leave the existing `_generator.templateHash` describing different content unless the whole template is regenerated through the compiler.
 
@@ -181,13 +142,12 @@ An implementation must not replace `_module.version` in already-compiled JSON. T
 
 | Area | Required cases |
 | --- | --- |
-| Attribute validation | Accepted type, unknown type, missing/extra attributes, wrong JSON types, duplicate keys, nulls, whitespace, and case handling. |
+| Attribute validation | Accepted type, unknown type, missing/partial/repeated CLI values, nulls, whitespace, and case handling. |
 | Identifier | Exactly seven hex characters; reject six/eight characters, non-ASCII lookalikes, prefixes, separators, and embedded newlines. Verify lowercase normalization. |
 | Version | Optional input prefix, canonical output, zero components, leading zeroes, component bounds, overlong values, prerelease/build rejection, and no trailing newline. |
-| File selection and precedence | No file read without the option, malformed/unreadable selected file, missing `module`, no helper-module propagation, selected-file plus version override, rejected file plus type/id options, partial/repeated CLI inputs, and `--pattern` rejection with any identity input. |
+| CLI input semantics | Complete tuple, partial/repeated values, and `--pattern` rejection with any identity input. |
 | Emission | Metadata beside `_generator`; preserve existing metadata; absent input leaves baseline output unchanged; deterministic output and normal template-hash behavior. |
 | Publication and consumption | Source publication parity with build, compiled JSON preservation, restore and consumer build, multiple uses, transitive nested templates, unknown future metadata preservation, and no identity propagation from parents. |
-| Dependency tracking | Selected-file addition, modification, and removal invalidate cached compilation through the auxiliary-file mechanism; no stale metadata survives incremental builds. |
 | Compatibility and diagnostics | Supported ARM language versions, array- and object-shaped resource collections, older templates without the field, and errors that never echo rejected values. |
 
 ### Server side changes (if applicable)
@@ -267,7 +227,7 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 ## Tradeoffs
 
 1. **Constrained identity versus flexibility.** Seven hex characters and numeric-only release versions limit free-form text but cannot represent every publisher's identifier or full SemVer. Explicit schema extensions are preferable to an arbitrary string escape hatch.
-1. **Explicit configuration versus convenience.** Selecting a file makes the compilation input visible and avoids breaking unrelated `metadata.json` files, but requires a command option. Auxiliary-file tracking and a targeted version override keep the published build deterministic without requiring release automation to duplicate stable values.
+1. **Explicit values versus source coupling.** Requiring the complete tuple keeps release identity independent of repository file conventions and metadata schemas, but publishing automation must supply all three values for each module.
 1. **Metadata is not provenance.** A reserved name prevents ordinary Bicep declarations from writing the field, but any caller can supply valid CLI inputs or edit ARM JSON. Format validation is neither publisher authentication nor proof that a field contains no sensitive information. Any future collector needs its own trust and validation boundary.
 1. **Artifact and compatibility costs.** Each module occurrence adds a small object and changes the compiled artifact. Existing published versions need republishing to gain this field; a consumer build cannot reliably reconstruct it. Strict rejection of malformed reserved objects must be assessed against existing JSON templates and older tooling.
 
@@ -279,24 +239,23 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 1. **Put module identification inside `_generator`.** That conflates module identity with compiler identity. A sibling `_module` object keeps their lifecycles and meanings separate.
 1. **Derive identity from a registry reference.** Registry hosts, repository paths, aliases, and tags are not a constrained opaque identity and can change through mirroring or republishing. This also fails to cover locally compiled modules.
 1. **Accept arbitrary metadata or full SemVer strings.** More flexible, but introduces free-form text without addressing the reason for strict attribute validation. This proposal starts with a closed object and numeric release core.
-1. **Use only a file or only CLI values.** Either reduces precedence rules, but requires either source-controlled release data or repetitive release arguments. The draft retains both paths, with explicit file selection and only a version override.
+1. **A metadata-file input.** A file could avoid repeated arguments, but is unnecessary for the current single-module publishing workflow and adds file-selection, precedence, and dependency-tracking behavior. It can be proposed separately if a concrete batch-publishing scenario requires it.
 
 ## Rollout plan
 
-1. Resolve the explicit-file option spelling, version grammar, source-archive behavior, and non-CLI input shape through this REP.
-1. Implement the shared validator and emission path, initially behind an experimental gate. Cover build, source-based publish, compilation dependency tracking, and consumer preservation together.
+1. Resolve CLI spelling, version grammar, and non-CLI input shape through this REP.
+1. Implement the shared validator and emission path, initially behind an experimental gate. Cover build, source-based publish, and consumer preservation together.
 1. Pilot publisher and consumer workflows, including AVM modules, without claiming that template metadata is being collected or surfaced.
 1. Stabilize the input/output contract and document minimum publisher tooling versions. Do not remove any existing AVM telemetry mechanism merely because this field is available.
 
 ## Unresolved questions
 
-1. Is `--module-metadata-file` the preferred option name, and how should editor/RPC callers supply the equivalent explicit file input?
-1. Are `--module-type`, `--module-id`, and `--module-version` the preferred names, and should source-based `publish` expose the same file-plus-version-override behavior directly?
+1. Are `--module-type`, `--module-id`, and `--module-version` the preferred names, and how should editor/RPC callers supply the equivalent tuple?
 1. Is a seven-character hexadecimal identifier the right long-term representation, or should the contract use a bounded integer? What assignment process prevents accidental identifier reuse within a type?
 1. Should version output retain the preferred `v` prefix or use unprefixed SemVer? Are prerelease versions required initially, and if so, what bounded grammar avoids arbitrary identifiers? Are the proposed numeric bounds appropriate?
 1. How should a publisher validate or document a hand-authored compiled JSON module without making consumer builds reject or rewrite it?
 1. What are the required opt-out semantics before any future telemetry collection is enabled? Compile-time identity is static and cannot be conditioned on a deployment parameter such as AVM's existing `enableTelemetry`.
-1. What preservation behavior is required across older Bicep versions, decompilation/recompilation, template specs, alternative module artifact formats, and `--with-source` source archives? The initial inline-template contract must not imply these paths are already covered.
+1. What preservation behavior is required across older Bicep versions, decompilation/recompilation, template specs, and alternative module artifact formats? The initial inline-template contract must not imply these paths are already covered.
 
 ## Out of scope
 
