@@ -50,6 +50,14 @@ The current [template writer](https://github.com/Azure/bicep/blob/2cba03c71c174e
 
 Nested Bicep modules are emitted by recursively writing their semantic model. Restored ARM JSON modules use an [ARM template writer](https://github.com/Azure/bicep/blob/2cba03c71c174ea3c811a1c7a7d8e22ec45d98fa/src/Bicep.Core/Emit/ArmTemplateWriter.cs) that writes the parsed template object unchanged. Consequently, JSON-module consumption preserves unrecognized top-level metadata, including `_module`, but does not validate it. The proposal validates the closed schema only when a Bicep publisher compilation emits `_module`; consumption deliberately retains pass-through compatibility.
 
+#### Wrapper integration
+
+The current [Azure CLI Bicep commands](https://learn.microsoft.com/en-us/cli/azure/bicep#az-bicep-publish) expose `az bicep build` and `az bicep publish`, but do not yet expose the proposed identity options. Follow-up Azure CLI work must add named `--module-type`, `--module-id`, and `--module-version` options to both commands, forward them to Bicep, update help and tests, and enforce the minimum Bicep version that supports them with consistent unsupported-binary errors.
+
+The current [Publish-AzBicepModule](https://learn.microsoft.com/en-us/powershell/module/az.resources/publish-azbicepmodule) cmdlet likewise does not expose identity parameters. Follow-up Azure PowerShell work must add `-ModuleType`, `-ModuleId`, and `-ModuleVersion`, forward them to Bicep, and cover help, tests, and minimum-version behavior. No public Azure PowerShell build cmdlet is identified; callers building from PowerShell continue to use standalone `bicep build`.
+
+Shared Bicep core owns validation and emission; wrappers only provide argument plumbing, help, tests, and capability handling. This requires separate Azure/azure-cli and Azure/azure-powershell changes. Wrapper parity is not an initial rollout or GA prerequisite: MAR invokes standalone `bicep publish` directly, so day-one AVM adoption uses standalone Bicep build and publish. Existing wrapper commands continue to work without identity inputs; callers that need them use standalone Bicep until the wrapper updates ship.
+
 #### Output contract
 
 When module identification inputs are present and valid, Bicep emits exactly this object at the root of the template being compiled:
@@ -239,14 +247,14 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 1. **Put module identification inside `_generator`.** That conflates module identity with compiler identity. A sibling `_module` object keeps their lifecycles and meanings separate.
 1. **Derive identity from a registry reference.** Registry hosts, repository paths, aliases, and tags are not a constrained opaque identity and can change through mirroring or republishing. This also fails to cover locally compiled modules.
 1. **Accept arbitrary metadata or full SemVer strings.** More flexible, but introduces free-form text without addressing the reason for strict attribute validation. This proposal starts with a closed object and numeric release core.
-1. **A metadata-file input.** A file could avoid repeated arguments, but is unnecessary for the current single-module publishing workflow and adds file-selection, precedence, and dependency-tracking behavior. It can be proposed separately if a concrete batch-publishing scenario requires it.
 
 ## Rollout plan
 
 1. Resolve CLI spelling, version grammar, and non-CLI input shape through this REP.
-1. Implement the shared validator and emission path, initially behind an experimental gate. Cover build, source-based publish, and consumer preservation together.
+1. Implement the shared validator and emission path, initially behind an experimental gate. Cover standalone Bicep build, source-based publish, and consumer preservation together.
 1. Pilot publisher and consumer workflows, including AVM modules, without claiming that template metadata is being collected or surfaced.
-1. Stabilize the input/output contract and document minimum publisher tooling versions. Do not remove any existing AVM telemetry mechanism merely because this field is available.
+1. Stabilize the standalone Bicep input/output contract and document its minimum version. Do not remove any existing AVM telemetry mechanism merely because this field is available.
+1. Deliver Azure CLI and Azure PowerShell named-parameter support as follow-up parity work. It does not block standalone Bicep adoption or the initial GA of this feature.
 
 ## Unresolved questions
 
@@ -265,3 +273,12 @@ For array-shaped ARM `resources`, the same metadata is located under the matchin
 - Support for module types other than `avm` in the initial release.
 - Changes to ARM resource tags, deployment resources used for existing telemetry, or resource provider behavior.
 - A generic mechanism for copying arbitrary repository metadata into ARM templates.
+
+## Input mechanisms considered
+
+These are alternatives considered during design; they are not part of the normative input contract.
+
+1. **CLI flags (chosen).** Named flags are explicit, discoverable, and scoped to one invocation entry point.
+1. **Environment variables.** They could flow through an inherited process environment, but wrapper propagation is unverified and ambient state risks identity leakage between builds.
+1. **`bicepconfig.json`.** Shared compiler configuration is available, but parent-directory discovery and inheritance could apply identity to helper modules; release version changes would also require mutating a configuration file.
+1. **A dedicated metadata file.** It is unnecessary for the current single-module publishing workflow and adds file-selection, precedence, and dependency-tracking complexity. It can be proposed separately if a concrete batch-publishing scenario requires it.
