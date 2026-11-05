@@ -40,6 +40,16 @@ The intended outcome is a bounded, machine-readable metadata contract, not an in
 
 ### Client side changes
 
+#### Existing implementation and required change points
+
+The current [build command](https://github.com/Azure/bicep/blob/2cba03c71c174ea3c811a1c7a7d8e22ec45d98fa/src/Bicep.Cli/Commands/BuildCommand.cs) resolves a file pattern and creates one compilation for each selected entry point. The proposed tuple therefore needs to flow through the command arguments and into each compilation; rejecting a tuple with multiple selected entry points is a deliberate new validation rule, not existing behavior.
+
+The current [template writer](https://github.com/Azure/bicep/blob/2cba03c71c174ea3c811a1c7a7d8e22ec45d98fa/src/Bicep.Core/Emit/TemplateWriter.cs) emits `metadata._generator` before authored metadata. The [metadata symbol validator](https://github.com/Azure/bicep/blob/2cba03c71c174ea3c811a1c7a7d8e22ec45d98fa/src/Bicep.Core/Semantics/MetadataSymbol.cs) already reserves every metadata identifier beginning with `_`. `_module` should use that reserved namespace, but the compiler needs a new compilation input and emitter path; it cannot be produced as an ordinary Bicep metadata declaration.
+
+Nested Bicep modules are emitted by recursively writing their semantic model. Restored ARM JSON modules use an [ARM template writer](https://github.com/Azure/bicep/blob/2cba03c71c174ea3c811a1c7a7d8e22ec45d98fa/src/Bicep.Core/Emit/ArmTemplateWriter.cs) that writes the parsed template object unchanged. Consequently, existing JSON-module consumption preserves unrecognized top-level metadata, including a well-formed `_module` object, but does not validate this new schema. The proposal requires explicit validation at the JSON boundary rather than treating current pass-through behavior as validation.
+
+The [source-file grouping](https://github.com/Azure/bicep/blob/2cba03c71c174ea3c811a1c7a7d8e22ec45d98fa/src/Bicep.Core/SourceGraph/SourceFileGroupingBuilder.cs) currently tracks Bicep source files and module artifacts, not arbitrary sibling files. Supporting adjacent `metadata.json` therefore requires a tracked compilation input and rebuild/invalidation integration. It must also have an equivalent path for non-CLI callers, such as the language server, rather than becoming a command-only preprocessor.
+
 #### Output contract
 
 When module identification inputs are present and valid, Bicep emits exactly this object at the root of the template being compiled:
@@ -85,7 +95,7 @@ File behavior:
 - A discovered file that cannot be read, contains malformed JSON or duplicate keys, or is not a JSON object: fail the build with an actionable diagnostic.
 - `module: null`, a partial object, or unknown properties inside that object: fail the build.
 
-The file is a tracked compilation input. Changing or removing it must invalidate affected compilation and emission caches. When referenced local Bicep modules are compiled, each resolves its own adjacent file independently. The compiler must not inspect arbitrary files in the registry cache to derive new module identification for already-compiled external modules.
+The file becomes a tracked compilation input. Changing or removing it must invalidate affected compilation and emission caches. When referenced local Bicep modules are compiled, each resolves its own adjacent file independently. The compiler must not inspect arbitrary files in the registry cache to derive new module identification for already-compiled external modules.
 
 Automatic discovery is proposed for discussion. Whether discovery should require explicit opt-in, and whether a configurable metadata file path is preferable, remain unresolved.
 
@@ -139,11 +149,13 @@ The publisher workflow is:
 
 The feature must not be implemented as a post-build text replacement. Compilation inputs must participate in normal dependency tracking, deterministic output, and template-hash generation.
 
-`bicep publish` can compile Bicep source directly. To avoid a publisher build carrying module identification that is then lost during publication, this draft proposes the same file discovery and explicit tuple on source-based `publish`, scoped to the module being published. The validator and emitter are shared, not reimplemented in command handlers. Publication of an already-compiled ARM JSON module preserves and validates any existing `_module`; these options must not be used to relabel an already-compiled module.
+`bicep publish` can compile Bicep source directly, then publish the emitted template. To avoid a publisher build carrying module identification that is then lost during publication, this draft proposes the same file discovery and explicit tuple on source-based `publish`, scoped to the module being published. The validator and emitter are shared, not reimplemented in command handlers.
 
-During a consumer build, restored ARM JSON modules retain their own `_module` objects when embedded in `Microsoft.Resources/deployments.properties.template`. Consumer CLI values describe only the consumer entry point and must not overwrite those objects. Other existing template metadata is preserved.
+Today, publishing an already-compiled ARM JSON module reads and uploads its bytes directly. It does not parse or validate `_module`. This proposal requires an explicit JSON parse-and-validate step before publishing compiled JSON if the closed schema is to be enforced on that path. The options must not relabel an already-compiled module. If compatibility review rules out validation of existing compiled JSON, the final design must say that this path preserves the object unchanged and define where validation does occur.
 
-A present reserved object in an external JSON template is validated using the same closed schema before it is emitted into the consumer output. Non-canonical but otherwise valid values can be normalized by a publisher build; already-published templates must contain the canonical output form and are not rewritten during consumption. Invalid reserved metadata is a build error, not silently trusted or stripped. External templates with no such object remain supported without inferred module identification.
+During a consumer build, the existing ARM JSON writer preserves each restored module's top-level metadata when it is embedded in `Microsoft.Resources/deployments.properties.template`. Consumer CLI values describe only the consumer entry point and must not overwrite those objects. This existing preservation is distinct from the proposed schema validation.
+
+The proposal is that a present reserved object in an external JSON template is validated using the same closed schema before it is emitted into consumer output. The compatibility policy for non-canonical but otherwise valid values, invalid values in already-published modules, and whether any path may normalize them remains unresolved. External templates with no such object remain supported without inferred module identification.
 
 This contract applies recursively to inline nested templates, including nested templates already embedded inside a restored module. Reusing the same module more than once preserves its identity on each occurrence. A parent has no module identification object unless its own inputs supply one.
 
