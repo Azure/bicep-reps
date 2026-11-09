@@ -1,5 +1,5 @@
 ---
-REP Number: "<Fill me in with a four-digit number matching the pull request number; update AFTER the PR is approved and BEFORE it is merged.>"
+REP Number: "0031"
 Author: levimatheri (Levi Muriuki)
 Start Date: 2026-10-18
 Feature Status: Private Preview
@@ -78,7 +78,33 @@ Add a new setting in `bicepconfig.json` that controls how registry modules are e
 ```
 If the value is set to `reference`, Bicep emits `<registry>/<repository>@<manifest-digest>` for registry modules.
 
-> Bicep emits the manifest digest so DRP deploys the exact artifact resolved during compilation, even if its tag is subsequently overwritten. The digest pins the artifact's config and all template layers.
+> Bicep emits the manifest digest so DRP deploys the exact artifact resolved during compilation, even if its tag is subsequently overwritten. The digest pins the artifact's config and all template layers, similar to pinning a GitHub Action to a commit SHA.
+
+##### Recording the original reference
+
+A digest alone does not tell readers which module version it came from. Bicep records each linked module's original reference in the template's top-level `metadata`, keyed by module symbolic name:
+
+```jsonc
+{
+  "metadata": {
+    "_generator": { ... },
+    "__bicep_registry_module_sources!": {
+      "vnet": "br:mcr.microsoft.com/bicep/avm/res/network/virtual-network:0.8.0"
+    }
+  }
+}
+```
+
+- **Informational only.** DRP does not read or validate this entry; `ociReference` stays the source of truth.
+- **No user conflicts.** The key follows the existing `__bicep_exported_variables!` convention. Bicep already rejects user `metadata` names starting with `_` (BCP268), and `!` is not valid in a Bicep identifier. A user `metadata` declaration therefore can't produce or overwrite this key.
+
+##### Supported registries
+
+When `"registryModules": "reference"` is set, a new linter rule flags any registry module whose host is not the target cloud's MAR host or an ACR login server (for example, `*.azurecr.io`).
+
+- **Fail at authoring time.** Users find out before deployment, not when DRP rejects the host.
+- **ACR custom domains are flagged.** Bicep can't verify that a custom domain resolves to ACR. Users can reference the registry's `*.azurecr.io` login server in their config instead.
+- **No partial linking.** To consume an unsupported registry, keep `"registryModules": "inline"` for that project. The rule can be relaxed once DRP supports more registries (see [Out of scope](#out-of-scope)).
 
 ##### Handling environment differences
 
@@ -112,14 +138,18 @@ See [REP 0023](../final/0023-bicep-configuration-inheritance.md) for configurati
 ##### Resolving an `ociReference`
 
 1. DRP verifies the registry host is on the cloud's allowlist (see [Registry access](#registry-access)).
-2. DRP resolves and verifies the manifest (by digest if present, otherwise by tag), and pins the manifest digest for the rest of the deployment.
-3. DRP validates that the template layer is under 4 MiB while streaming its content and deploys the entry point template.
+2. DRP resolves the manifest by digest, verifies it, and pins it for the rest of the deployment.
+3. DRP streams the template layer and deploys the entry point template. While streaming, DRP checks that the layer is under 4 MiB and that its content hash matches its digest.
+
+> DRP verifies each layer lazily, as part of the pull, rather than verifying the whole artifact up front. Hash verification protects against a compromised registry serving different content for a pinned digest.
 
 ##### Constraints on templates loaded from an artifact
 
 To ensure an OCI artifact is self-contained and nested templates do not reach outside the artifact context, nested deployments inside an artifact template (including inline nested templates) may not use external links (`uri`, `id`, `relativePath`, `queryString`, `contentVersion`, or `ociReference`).
 
-> See [Unresolved questions](#unresolved-questions) for how to handle existing v1 modules that contain an embedded Template Spec (`templateLink.id`).
+**Exception for v1 artifacts:** DRP allows `templateLink.id` (Template Spec references) when resolving a v1 artifact (`config.v1`). Existing v1 modules that use a Template Spec (`ts:`) already deploy today when inlined, so blocking them when linked would be a breaking change. Publishers don't need to republish.
+
+v2 artifacts stay strict: nested deployments may use only inline `template` or `templateLink.digest`.
 
 ##### Private ACR authentication
 
@@ -301,7 +331,9 @@ Older versions already reject the unrecognized v2 config media type with the fol
 
 1. When resolving a `templateLink.ociReference`, DRP accepts both `v1` and `v2` config media types. For `v2` (`application/vnd.ms.bicep.module.config.v2+json`), DRP reads `entryPointDigest` from the config blob to locate and deploy the entry point layer.
 2. Within a v2 artifact context, nested deployments may reference other layers in the same artifact manifest using `templateLink.digest` (in addition to inline `template`).
-3. When a nested deployment specifies `templateLink.digest`, DRP verifies the digest is declared as a template layer in the pinned artifact manifest, streams the layer while validating that it is under 4 MiB, and deploys it within the same artifact context.
+3. When a nested deployment specifies `templateLink.digest`, DRP verifies the digest is declared as a template layer in the pinned artifact manifest. DRP then streams the layer, checks its size (< 4 MiB) and content hash, and deploys it within the same artifact context.
+
+Identical module templates produce identical digests, so a v2 artifact stores each shared module once.
 
 #### Example: Inside a multi-layer (v2) module artifact
 
@@ -336,7 +368,7 @@ A new API version adds two properties to `templateLink` (neither can be combined
 
 | Property | Proposal | Description |
 | --- | --- | --- |
-| `ociReference` | Primary | OCI link in the form: `<registry>/<repository>`, with `@<digest>` or `:<tag>`. Bicep always emits `@<digest>`; if both are present, the digest takes precedence and the tag is ignored. |
+| `ociReference` | Primary | OCI link in the form `<registry>/<repository>@<digest>`. Tags are not accepted; DRP rejects references without a digest or with a tag. |
 | `digest` | Secondary | Content hash (digest) of a nested template layer within the current artifact context. |
 
 ## Tradeoffs
@@ -347,14 +379,14 @@ A new API version adds two properties to `templateLink` (neither can be combined
 1. **Deploy-time availability and retention.** Deployments depend on registry availability and rate limits at runtime, and purging untagged manifests in ACR can break previously compiled templates pinned by digest.
    > Document ACR retention best practices (prefer immutable tags and avoid purging manifests still referenced by active deployments).
 1. **DRP network fetch cost.** Shifting module resolution to DRP adds network fetches across linked artifacts and v2 layers at deploy time.
-   > Could consider caching digests in DRP across nested deployments.
+   > Digest-addressed layers are immutable, so DRP could cache them across nested deployments and deployments (for example, popular AVM modules). Caching is deferred until fetch metrics show it is needed.
 
 ## Alternatives
 
 1. **Rely solely on whole-deployment publishing ([#26](https://github.com/Azure/bicep-reps/pull/26)).** Requiring every consumer to publish their root deployment as an OCI artifact forces customers who only consume public AVM modules on MAR to provision and manage a private ACR and alter their CI/CD pipelines. Supporting `templateLink.ociReference` for registry modules lets those consumers deploy their templates directly without introducing a publishing step.
 2. **Make `"reference"` the default for `emitter.registryModules`.** Emitting references is primarily needed when templates approach the 4 MiB limit, and linking requires deploy-time registry support—which is not yet available for non-ACR/MAR registries, network-restricted registries, or cross-tenant registries (see [Out of scope](#out-of-scope)). Until those scenarios are supported, emitting references should remain opt-in.
 3. **Emit `templateLink.ociReference` for transitive registry modules inside a v2 artifact instead of packaging the full closure as `templateLink.digest` layers.** Packaging the entire closure into layers within the published artifact guarantees self-containment, immutability under a single manifest digest, and a single registry authentication boundary at deploy time.
-
+4. **Accept tags in `ociReference`.** A tag is mutable, so the content could change between compile and deploy. Digest-only references keep deployments reproducible. Accepting tags later would be non-breaking.
 ## Rollout plan
 
 1. **Experimental / Private preview:** Ship `emitter.registryModules` and `bicep publish --artifact-format` behind a Bicep experimental flag, and gate `templateLink.ociReference` and `templateLink.digest` in DRP behind a feature flag for allowlisted subscriptions.
@@ -364,10 +396,12 @@ A new API version adds two properties to `templateLink` (neither can be combined
 
 ## Unresolved questions
 
-1. **Template Specs inside v1 modules.** A v1 registry module that references a Template Spec (`ts:`) emits `templateLink.id` in its compiled template. If DRP blocks `templateLink.id` inside all artifact templates, linking an existing v1 module that uses a Template Spec via `ociReference` would fail at deploy time.
+
+1. ✅ **Template Specs inside v1 modules.** A v1 registry module that references a Template Spec (`ts:`) emits `templateLink.id` in its compiled template. If DRP blocks `templateLink.id` inside all artifact templates, linking an existing v1 module that uses a Template Spec via `ociReference` would fail at deploy time.
     - **Option A (backward-compatible in DRP):** Allow `templateLink.id` in DRP when resolving v1 artifacts (`config.v1`), while keeping v2 artifacts strictly restricted to inline `template` and `templateLink.digest`. This lets consumers link existing v1 modules that reference Template Specs without requiring publishers to republish them.
     - **Option B (compile-time error in Bicep):** Reject `templateLink.id` in DRP for all artifacts and emit a compile-time error in `bicep build` when a linked v1 module contains a `templateLink.id`, directing the user to either inline the module or republish it in v2 format.
-2. **Mixing supported and unsupported registries in the same template.** `emitter.registryModules` is a project-wide setting, so enabling `"reference"` would also emit `ociReference` for registries DRP cannot reach (such as network-restricted ACRs, cross-tenant ACRs, or non-MAR/ACR registries).
+    - **Decision: Option A.** Blocking Template Specs in existing v1 modules would break them; v2 stays strict. See [Constraints on templates loaded from an artifact](#constraints-on-templates-loaded-from-an-artifact).
+2. ✅ **Mixing supported and unsupported registries in the same template.** `emitter.registryModules` is a project-wide setting, so enabling `"reference"` would also emit `ociReference` for registries DRP cannot reach (such as network-restricted ACRs, cross-tenant ACRs, or non-MAR/ACR registries).
     - **Option A (linter rule for non-MAR/ACR registries):** Add a linter rule that warns when `"registryModules": "reference"` is enabled and a module references a non-MAR/ACR registry host.
     - **Option B (per-module decorator):** Add a decorator (such as `@inline()`) on `module` declarations to selectively inline specific modules.
     - **Option C (per-registry override under `emitter` in `bicepconfig.json`):** Add an override map keyed by resolved registry host under `emitter`, keeping `.bicep` files free of environment-specific mechanics and working for both aliased and direct `br:` references:
@@ -381,10 +415,12 @@ A new API version adds two properties to `templateLink` (neither can be combined
         }
       }
       ```
+    - **Decision: Option A.** A linter rule flags non-MAR/ACR hosts at authoring time, including ACR custom domains. No per-module or per-registry overrides; mixing registries in one project is expected to be rare. See [Supported registries](#supported-registries).
 
 ## Out of scope
 
 - **Registries other than MAR and ACR**, such as GitHub Container Registry or Docker Hub. Registries that don't trust Entra need a different credential model, such as a Key Vault–backed credential or perhaps secure params ([#26](https://github.com/Azure/bicep-reps/pull/26)).
+- **ACR custom domains.** Bicep can't verify that a custom domain points to ACR. Users must reference the `*.azurecr.io` login server instead.
 - **Network-restricted registries**, such as registries behind a firewall or private endpoint. A possible path is ACR support for [Network Security Perimeter](https://learn.microsoft.com/azure/private-link/network-security-perimeter-concepts) with the `AzureResourceManager` service tag, but this is something ACR has not committed to supporting at the moment.
 - **Registries in a different Entra tenant** from the caller - one potential option here could be to leverage:
     - ARM's [`x-ms-authorization-auxiliary`token](https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/authenticate-multi-tenant) 
